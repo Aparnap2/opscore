@@ -1,11 +1,14 @@
 from typing import TypedDict, Annotated, Optional, Type
 import operator
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel
 
 from apps.api.agents.document_classifier import classify_document
 from apps.api.services.llm_client import llm_client
 from apps.api.api.v1.schemas.documents import DOC_TYPE_SCHEMAS
+from apps.api.config import settings
 
 
 class ExtractionState(TypedDict):
@@ -107,7 +110,7 @@ async def node_erp_sync(state: ExtractionState) -> ExtractionState:
     return {**state, "needs_hitl": False, "hitl_reason": None}
 
 
-def build_extraction_graph():
+def build_extraction_graph(checkpointer=None):
     workflow = StateGraph(ExtractionState)
 
     workflow.add_node("classify", node_classify)
@@ -124,7 +127,26 @@ def build_extraction_graph():
     workflow.add_edge("route_to_hitl", END)
     workflow.add_edge("proceed_to_erp", END)
 
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)
+
+
+async def get_checkpointer():
+    """Get Postgres checkpointer for state persistence."""
+    return await AsyncPostgresSaver.from_conn_string(settings.database_url)
+
+
+async def run_extraction_graph(state: dict, thread_id: str = None):
+    """Run extraction graph with optional state persistence."""
+    if thread_id:
+        checkpointer = await get_checkpointer()
+        await checkpointer.setup()
+        app = build_extraction_graph(checkpointer=checkpointer)
+        
+        config = {"configurable": {"thread_id": thread_id or f"doc_{state['job_id']}"}}
+        return await app.ainvoke(state, config=config)
+    else:
+        app = build_extraction_graph()
+        return await app.ainvoke(state)
 
 
 extraction_graph = build_extraction_graph()
