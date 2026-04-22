@@ -35,7 +35,7 @@ dependencies = [
     "graphiti-core>=0.28.2",
     "neo4j>=5.25.0",
 
-    "slack-sdk>=4.0.0",
+    "slack-sdk>=3.33.1,<4",
     "slack-bolt>=1.21.0",
 
     "ragas>=0.2.0",

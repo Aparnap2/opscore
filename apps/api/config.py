@@ -1,29 +1,24 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"
+    )
+
     APP_NAME: str = "OpsCore"
     APP_VERSION: str = "0.1.0"
 
-    DATABASE_URL: str = "postgresql+asyncpg://opscore:opscore@localhost:5432/opscore"
+    DATABASE_URL: str = "postgresql+asyncpg://admin:password@localhost:5433/opscore"
 
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://localhost:6380/0"
 
-    QDRANT_URL: str = "http://localhost:6333"
-    QDRANT_COLLECTION_PREFIX: str = "opscore_"
-
-    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_URI: str = "bolt://localhost:7688"
     NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str = "neo4j"
-
-    TEMPORAL_ADDRESS: str = "localhost:7233"
-    TEMPORAL_NAMESPACE: str = "default"
-
-    MINIO_ENDPOINT: str = "localhost:9000"
-    MINIO_ACCESS_KEY: str = "minio"
-    MINIO_SECRET_KEY: str = "minio"
-    MINIO_BUCKET: str = "opscore-documents"
+    NEO4J_PASSWORD: str = "password"
 
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
@@ -46,19 +41,12 @@ class Settings(BaseSettings):
     QUICKBOOKS_CLIENT_SECRET: str = ""
     QUICKBOOKS_REALM_ID: str = ""
 
-    GRAFANA_URL: str = "http://localhost:3001"
-    GRAFANA_API_KEY: str = ""
-
     RATE_LIMIT_PER_MINUTE: int = 100
 
     CRAWL4AI_MAX_DEPTH: int = 3
     CRAWL4AI_CONCURRENT_TASKS: int = 5
 
     DOCLING_CACHE_DIR: str = "/tmp/docling"
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 settings = Settings()
