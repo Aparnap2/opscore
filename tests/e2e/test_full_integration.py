@@ -1,6 +1,7 @@
 """Complete E2E Test - All Features Together"""
 import asyncio
 import json
+import os
 import sys
 sys.path.insert(0, '/home/aparna/Desktop/opscore')
 
@@ -8,8 +9,8 @@ import httpx
 import numpy as np
 
 # LLM Config
-OLLAMA_API_KEY = '658363c8b60149b18e08979cb35a5d7c.DdPMsnguors5_NijmNKrEqen'
-OLLAMA_BASE_URL = 'https://ollama.com'
+OLLAMA_API_KEY = os.environ.get('OLLAMA_API_KEY', '')
+OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'https://ollama.com')
 
 from apps.api.db.session import engine
 from apps.api.agents.document_classifier import classify_document
