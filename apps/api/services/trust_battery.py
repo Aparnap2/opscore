@@ -46,6 +46,9 @@ class TrustBattery:
         self.days_in_current_tier += days
         self.last_active_at = datetime.utcnow()
 
+        if self.tier == TrustTier.PROBATION and self.days_in_current_tier >= 30 and self.consecutive_successes >= 3:
+            self._try_upgrade()
+
         if self.tier != TrustTier.PROBATION and (self.days_in_current_tier - days) >= 90:
             self._downgrade()
 
