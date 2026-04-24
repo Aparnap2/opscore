@@ -13,6 +13,17 @@ class QuickBooksMCP:
         self._session = None
 
     async def create_bill(self, invoice: dict, vendor_qb_id: str) -> Optional[str]:
+        from apps.api.integrations.mock_clients import quickbooks_client
+        
+        if not self.mcp_url:
+            logger.warning("QuickBooks MCP not configured, using mock")
+            result = await quickbooks_client.create_bill(
+                vendor_id=vendor_qb_id,
+                amount=invoice.get("total_amount", {}).get("value", 0),
+                line_items=invoice.get("line_items", [])
+            )
+            return result.get("bill_id")
+
         try:
             line_items = []
             for item in invoice.get("line_items", []):

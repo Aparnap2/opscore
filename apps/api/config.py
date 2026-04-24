@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     QUICKBOOKS_CLIENT_SECRET: str = ""
     QUICKBOOKS_REALM_ID: str = ""
 
+    QB_BASE_URL: str = "http://localhost:3001/mock/qb"
+    SLACK_BASE_URL: str = "http://localhost:3001/mock/slack"
+    LINEAR_BASE_URL: str = "http://localhost:3001/mock/linear"
+
     RATE_LIMIT_PER_MINUTE: int = 100
 
     CRAWL4AI_MAX_DEPTH: int = 3

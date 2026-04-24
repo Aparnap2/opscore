@@ -1,121 +1,111 @@
 {
-  "version": "6.0.0",
-  "prototypes": [],
-  "entries": [
+  "uuid": "2fd2e773-c161-4287-a8f2-f45e0741f504",
+  "lastMigration": 32,
+  "name": "OpsCore Mocks",
+  "endpointPrefix": "",
+  "latency": 100,
+  "port": 3001,
+  "hostname": "",
+  "folders": [],
+  "routes": [
     {
-      "_id": "1",
-      "name": "Slack Webhook Mock",
-      "sort": 0,
-      "groupId": "group1",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "raw",
-          "raw": "",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "parameters": [],
-        "url": {
-          "protocol": "http",
-          "host": [
-            "localhost",
-            "3001"
-          ],
-          "path": [
-            "slack",
-            "webhook"
-          ],
-          "query": []
+      "uuid": "qb-create-bill",
+      "type": "http",
+      "documentation": "Mock QuickBooks create bill",
+      "method": "post",
+      "endpoint": "mock/qb/create_bill",
+      "responses": [
+        {
+          "uuid": "resp-qb-bill",
+          "body": "{\"bill_id\": \"QB-MOCK-12345\", \"status\": \"active\"}",
+          "latency": 50,
+          "statusCode": 200,
+          "label": "Success",
+          "headers": [{"key": "Content-Type", "value": "application/json"}],
+          "bodyType": "INLINE",
+          "rules": []
         }
-      },
-      "response": {
-        "statusCode": 200,
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "text",
-          "text": "{\"ok\": true, \"channel\": \"C12345\", \"ts\": \"1234567890.123456\"}"
-        },
-        "redirectURL": "",
-        "redirectURLStatusCode": 302
-      },
-      "events": {
-        "beforeEach": [],
-        "afterEach": [],
-        "before": [],
-        "after": []
-      }
+      ],
+      "responseMode": null
     },
     {
-      "_id": "2",
-      "name": "QuickBooks Bill Mock",
-      "sort": 1,
-      "groupId": "group1",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "raw",
-          "raw": "",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "parameters": [],
-        "url": {
-          "protocol": "http",
-          "host": [
-            "localhost",
-            "3001"
-          ],
-          "path": [
-            "quickbooks",
-            "bill"
-          ],
-          "query": []
+      "uuid": "qb-create-vendor",
+      "type": "http",
+      "documentation": "Mock QuickBooks create vendor",
+      "method": "post",
+      "endpoint": "mock/qb/create_vendor",
+      "responses": [
+        {
+          "uuid": "resp-qb-vendor",
+          "body": "{\"vendor_id\": \"QB-V-MOCK-67890\", \"sync_token\": \"0\"}",
+          "latency": 50,
+          "statusCode": 200,
+          "label": "Success",
+          "headers": [{"key": "Content-Type", "value": "application/json"}],
+          "bodyType": "INLINE",
+          "rules": []
         }
-      },
-      "response": {
-        "statusCode": 200,
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "text",
-          "text": "{\"success\": true, \"billId\": \"qb_bill_123\"}"
-        },
-        "redirectURL": "",
-        "redirectURLStatusCode": 302
-      },
-      "events": {
-        "beforeEach": [],
-        "afterEach": [],
-        "before": [],
-        "after": []
-      }
+      ],
+      "responseMode": null
+    },
+    {
+      "uuid": "slack-post-message",
+      "type": "http",
+      "documentation": "Mock Slack chat.postMessage",
+      "method": "post",
+      "endpoint": "mock/slack/chat.postMessage",
+      "responses": [
+        {
+          "uuid": "resp-slack-msg",
+          "body": "{\"ok\": true, \"channel\": \"C123456\", \"ts\": \"1234567890.123456\", \"message\": {\"text\": \"Test message\"}}",
+          "latency": 30,
+          "statusCode": 200,
+          "label": "Success",
+          "headers": [{"key": "Content-Type", "value": "application/json"}],
+          "bodyType": "INLINE",
+          "rules": []
+        }
+      ],
+      "responseMode": null
+    },
+    {
+      "uuid": "linear-create-issue",
+      "type": "http",
+      "documentation": "Mock Linear issue create",
+      "method": "post",
+      "endpoint": "mock/linear/issues",
+      "responses": [
+        {
+          "uuid": "resp-linear-issue",
+          "body": "{\"data\": {\"issueCreate\": {\"issue\": {\"id\": \"LIN-MOCK-42\", \"identifier\": \"OPS-42\", \"title\": \"Compliance Gap\"}}}}",
+          "latency": 40,
+          "statusCode": 200,
+          "label": "Success",
+          "headers": [{"key": "Content-Type", "value": "application/json"}],
+          "bodyType": "INLINE",
+          "rules": []
+        }
+      ],
+      "responseMode": null
     }
   ],
-  "folders": {
-    "order": [
-      "group1"
-    ],
-    "group1": {
-      "name": "OpsCore Mocks",
-      "isActive": true
-    }
+  "rootChildren": [
+    {"type": "route", "uuid": "qb-create-bill"},
+    {"type": "route", "uuid": "qb-create-vendor"},
+    {"type": "route", "uuid": "slack-post-message"},
+    {"type": "route", "uuid": "linear-create-issue"}
+  ],
+  "proxyMode": false,
+  "proxyHost": "",
+  "cors": true,
+  "headers": [{"key": "Content-Type", "value": "application/json"}],
+  "tlsOptions": {
+    "enabled": false,
+    "type": "CERT",
+    "pfxPath": "",
+    "certPath": "",
+    "keyPath": "",
+    "caPath": "",
+    "passphrase": ""
   }
 }
