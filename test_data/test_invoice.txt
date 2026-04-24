@@ -1,0 +1,30 @@
+TAX INVOICE
+
+Invoice Number: INV-2024-001
+Date: 2024-01-15
+Due Date: 2024-02-15
+
+From: Tech Solutions Pvt Ltd
+GSTIN: 27AAPCS1234A1Z5
+Address: 123 Business Park, Mumbai - 400001
+
+To: ABC Corporation Pvt Ltd
+GSTIN: 27AABCF1234A1Z5
+Address: 456 Industrial Area, Mumbai - 400002
+
+Description         Quantity    Rate      Amount
+-----------         --------    -----    ------
+Consulting Services    10        1000     10000
+Software License    1         5000      5000
+Training           5         500      2500
+
+Subtotal: 17500
+CGST 9%: 1575
+SGST 9%: 1575
+IGST 18%: 3150
+--------
+Total: 23800
+
+Bank Details:
+HDFC Bank - Account No: 1234567890
+IFSC: HDFC0001234

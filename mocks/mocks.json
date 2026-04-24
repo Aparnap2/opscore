@@ -1,0 +1,121 @@
+{
+  "version": "6.0.0",
+  "prototypes": [],
+  "entries": [
+    {
+      "_id": "1",
+      "name": "Slack Webhook Mock",
+      "sort": 0,
+      "groupId": "group1",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "parameters": [],
+        "url": {
+          "protocol": "http",
+          "host": [
+            "localhost",
+            "3001"
+          ],
+          "path": [
+            "slack",
+            "webhook"
+          ],
+          "query": []
+        }
+      },
+      "response": {
+        "statusCode": 200,
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "text",
+          "text": "{\"ok\": true, \"channel\": \"C12345\", \"ts\": \"1234567890.123456\"}"
+        },
+        "redirectURL": "",
+        "redirectURLStatusCode": 302
+      },
+      "events": {
+        "beforeEach": [],
+        "afterEach": [],
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "_id": "2",
+      "name": "QuickBooks Bill Mock",
+      "sort": 1,
+      "groupId": "group1",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "parameters": [],
+        "url": {
+          "protocol": "http",
+          "host": [
+            "localhost",
+            "3001"
+          ],
+          "path": [
+            "quickbooks",
+            "bill"
+          ],
+          "query": []
+        }
+      },
+      "response": {
+        "statusCode": 200,
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "text",
+          "text": "{\"success\": true, \"billId\": \"qb_bill_123\"}"
+        },
+        "redirectURL": "",
+        "redirectURLStatusCode": 302
+      },
+      "events": {
+        "beforeEach": [],
+        "afterEach": [],
+        "before": [],
+        "after": []
+      }
+    }
+  ],
+  "folders": {
+    "order": [
+      "group1"
+    ],
+    "group1": {
+      "name": "OpsCore Mocks",
+      "isActive": true
+    }
+  }
+}
