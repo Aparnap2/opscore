@@ -1,0 +1,133 @@
+# OpsCore v2.0 - CI Pipeline
+# 
+# Runs on: push to main, feature branches, and PRs
+# 
+# Jobs:
+#   - unit: golangci-lint + unit tests (no external services)
+#   - integration: docker services + integration tests with -tags integration
+
+name: CI
+
+on:
+  push:
+    branches: [main, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.25'
+  GOLANGCI_LINT_VERSION: v2.1.2
+
+jobs:
+  # =======================================================================
+  # Unit Tests - No external services required
+  # =======================================================================
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m
+
+      - name: Run unit tests
+        run: go test ./internal/domain/... -v -race
+
+      - name: Build check
+        run: go build ./...
+
+  # =======================================================================
+  # Integration Tests - Requires Docker services
+  # =======================================================================
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [unit]
+    
+    services:
+      # Cosmos DB emulator
+      cosmos:
+        image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+        ports:
+          8081:8081
+          1234:1234
+        options: --memory 4g
+
+      # Azurite blob/queue storage
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite:latest
+        ports:
+          10000:10000
+          10001:10001
+
+      # Mockoon slack mock
+      mockoon:
+        image: mockoon/cli:latest
+        ports:
+          3100:3100
+        env:
+          MOCK_OON_CLI_ARGS: --port 3100 --data /data/slack_mock.json
+        volumes:
+          ./tests/mockoon:/data
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Docker Compose
+        uses: add-jewelry/installer-action@v1
+        with:
+          version: v2.14.0
+
+      - name: Start Docker services
+        run: docker compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for Cosmos..."
+          sleep 30
+          echo "Waiting for Azurite..."
+          sleep 5
+          echo "Waiting for Mockoon..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:3100/health > /dev/null 2>&1; then
+              echo "Mockoon ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run integration tests
+        run: |
+          go test ./internal/adapters/... ./internal/providers/... \
+            -tags integration \
+            -v -race \
+            -count=1
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: |
+            docker compose -f docker-compose.test.yml logs -- nohup
+
+      - name: Stop Docker services
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
