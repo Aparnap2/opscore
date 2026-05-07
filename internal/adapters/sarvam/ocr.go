@@ -47,7 +47,7 @@ func NewOCRAdapter(config OCRConfig) *OCRAdapter {
 
 	return &OCRAdapter{
 		client: &http.Client{Timeout: 120 * time.Second},
-		config:  config,
+		config: config,
 	}
 }
 
@@ -140,7 +140,7 @@ func (o *OCRAdapter) extractFromURL(ctx context.Context, url string) (*providers
 // Response: {"job_id": "job_12345", "status": "Accepted"}
 func (o *OCRAdapter) createJob(ctx context.Context) (string, error) {
 	type jobParams struct {
-		Language    string `json:"language"`
+		Language     string `json:"language"`
 		OutputFormat string `json:"output_format"`
 	}
 
@@ -157,7 +157,7 @@ func (o *OCRAdapter) createJob(ctx context.Context) (string, error) {
 	// Output format must be "html" or "md" (json is always included by default)
 	reqBody := createJobRequest{
 		JobParameters: jobParams{
-			Language:    "en-IN",
+			Language:     "en-IN",
 			OutputFormat: "md",
 		},
 	}
@@ -207,22 +207,22 @@ func (o *OCRAdapter) createJob(ctx context.Context) (string, error) {
 // Response: {"job_id": "uuid", "upload_urls": {"document.pdf": {"url": "..."}}}
 func (o *OCRAdapter) getUploadURL(ctx context.Context, jobID, filename string) (string, error) {
 	type uploadFilesRequest struct {
-		JobID  string   `json:"job_id"`
-		Files  []string `json:"files"`
+		JobID string   `json:"job_id"`
+		Files []string `json:"files"`
 	}
 
 	// Response format varies - handle different structures
 	type uploadURLInfo struct {
-		URL       string `json:"url"`
-		FileURL   string `json:"file_url"` // Azure storage format
+		URL     string `json:"url"`
+		FileURL string `json:"file_url"` // Azure storage format
 	}
 
 	type uploadFilesResponse struct {
-		JobID       string                     `json:"job_id"`
-		JobState    string                     `json:"job_state"`
-		UploadURLs map[string]uploadURLInfo   `json:"upload_urls"`
-		Message     string                     `json:"message,omitempty"`
-		Code        int                        `json:"code,omitempty"`
+		JobID      string                   `json:"job_id"`
+		JobState   string                   `json:"job_state"`
+		UploadURLs map[string]uploadURLInfo `json:"upload_urls"`
+		Message    string                   `json:"message,omitempty"`
+		Code       int                      `json:"code,omitempty"`
 	}
 
 	// Use just the filename without path
@@ -234,8 +234,8 @@ func (o *OCRAdapter) getUploadURL(ctx context.Context, jobID, filename string) (
 	}
 
 	reqBody := uploadFilesRequest{
-		JobID:  jobID,
-		Files:  []string{baseFilename},
+		JobID: jobID,
+		Files: []string{baseFilename},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -401,8 +401,8 @@ func (o *OCRAdapter) pollForResult(ctx context.Context, jobID string) (*provider
 			var jobResult struct {
 				JobID    string          `json:"job_id"`
 				JobState string          `json:"job_state"`
-				Output   json.RawMessage `json:"output,omitempty"`
 				Error    string          `json:"error,omitempty"`
+				Output   json.RawMessage `json:"output,omitempty"`
 			}
 
 			body, err := io.ReadAll(resp.Body)
@@ -410,7 +410,7 @@ func (o *OCRAdapter) pollForResult(ctx context.Context, jobID string) (*provider
 				return nil, fmt.Errorf("reading response: %w", err)
 			}
 
-if err := json.Unmarshal(body, &jobResult); err != nil {
+			if err := json.Unmarshal(body, &jobResult); err != nil {
 				return nil, fmt.Errorf("decoding result: %w", err)
 			}
 
@@ -492,7 +492,7 @@ func (m *OCRAdapterMock) Extract(ctx context.Context, input string) (*providers.
 	return &providers.OCRResult{
 		Text:       "mocked text",
 		Confidence: 0.95,
-		Provider:  "sarvam-mock",
+		Provider:   "sarvam-mock",
 	}, nil
 }
 
@@ -546,9 +546,9 @@ func (o *OCRAdapter) getDownloadURL(ctx context.Context, jobID string) (string, 
 		FileURL string `json:"file_url"`
 	}
 	type downloadFilesResponse struct {
-		JobID       string `json:"job_id"`
-		JobState    string `json:"job_state"`
 		DownloadURLs map[string]downloadFileInfo `json:"download_urls"`
+		JobID        string                      `json:"job_id"`
+		JobState     string                      `json:"job_state"`
 	}
 
 	url := fmt.Sprintf("%s/doc-digitization/job/v1/%s/download-files", o.config.BaseURL, jobID)
@@ -621,7 +621,7 @@ func (o *OCRAdapter) downloadAndExtract(ctx context.Context, downloadURL string)
 
 	// Priority: .md > .html > .json
 	var extractedText string
-	
+
 	for _, file := range reader.File {
 		name := strings.ToLower(file.Name)
 		if strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".markdown") {

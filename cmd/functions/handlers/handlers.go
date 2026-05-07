@@ -33,8 +33,8 @@ const (
 
 // Container names
 const (
-	ContainerDocuments = "documents"
-	ContainerVendors   = "vendors"
+	ContainerDocuments  = "documents"
+	ContainerVendors    = "vendors"
 	ContainerCompliance = "compliance"
 )
 
@@ -103,10 +103,10 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 // Request/Response types
 type UploadResponse struct {
-	JobID      string `json:"job_id"`
-	Status    string `json:"status"`
-	BlobURL    string `json:"blob_url,omitempty"`
-	Message    string `json:"message,omitempty"`
+	JobID   string `json:"job_id"`
+	Status  string `json:"status"`
+	BlobURL string `json:"blob_url,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type JobStatusResponse struct {
@@ -135,9 +135,9 @@ type VendorSubmitRequest struct {
 }
 
 type SlackWebhookRequest struct {
-	Type    string `json:"type"`
-	Challenge string `json:"challenge,omitempty"`
-	Event   map[string]any `json:"event,omitempty"`
+	Event     map[string]any `json:"event,omitempty"`
+	Type      string         `json:"type"`
+	Challenge string         `json:"challenge,omitempty"`
 }
 
 type SlackWebhookResponse struct {

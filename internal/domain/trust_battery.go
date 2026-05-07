@@ -6,12 +6,12 @@ import (
 )
 
 type TrustBattery struct {
-	Tier                 TrustTier   `json:"tier"`
-	TrustScore           int         `json:"trust_score"`
-	ConsecutiveSuccesses int         `json:"consecutive_successes"`
-	ConsecutiveErrors    int         `json:"consecutive_errors"`
-	DaysInCurrentTier   int         `json:"days_in_current_tier"`
-	LastActiveAt         *time.Time  `json:"last_active_at"`
+	LastActiveAt         *time.Time `json:"last_active_at"`
+	Tier                 TrustTier  `json:"tier"`
+	TrustScore           int        `json:"trust_score"`
+	ConsecutiveSuccesses int        `json:"consecutive_successes"`
+	ConsecutiveErrors    int        `json:"consecutive_errors"`
+	DaysInCurrentTier    int        `json:"days_in_current_tier"`
 }
 
 func NewTrustBattery() *TrustBattery {
@@ -21,7 +21,7 @@ func NewTrustBattery() *TrustBattery {
 		TrustScore:           0,
 		ConsecutiveSuccesses: 0,
 		ConsecutiveErrors:    0,
-		DaysInCurrentTier:   0,
+		DaysInCurrentTier:    0,
 		LastActiveAt:         &now,
 	}
 }
@@ -140,8 +140,8 @@ func (tb *TrustBattery) tierIndex() int {
 
 func (tb *TrustBattery) ToMap() map[string]interface{} {
 	result := map[string]interface{}{
-		"tier":                   string(tb.Tier),
-		"trust_score":            tb.TrustScore,
+		"tier":                  string(tb.Tier),
+		"trust_score":           tb.TrustScore,
 		"consecutive_successes": tb.ConsecutiveSuccesses,
 		"consecutive_errors":    tb.ConsecutiveErrors,
 		"days_in_current_tier":  tb.DaysInCurrentTier,

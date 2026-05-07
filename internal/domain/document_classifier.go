@@ -8,18 +8,18 @@ import (
 type DocumentType string
 
 const (
-	DocumentTypeInvoice        DocumentType = "invoice"
-	DocumentTypeContract       DocumentType = "contract"
-	DocumentTypePurchaseOrder  DocumentType = "purchase_order"
-	DocumentTypeGSTNotice      DocumentType = "gst_notice"
-	DocumentTypeUnknown        DocumentType = "unknown"
+	DocumentTypeInvoice       DocumentType = "invoice"
+	DocumentTypeContract      DocumentType = "contract"
+	DocumentTypePurchaseOrder DocumentType = "purchase_order"
+	DocumentTypeGSTNotice     DocumentType = "gst_notice"
+	DocumentTypeUnknown       DocumentType = "unknown"
 )
 
 // ClassificationResult holds the document classification result
 type ClassificationResult struct {
-	Type        DocumentType `json:"type"`
-	Confidence float64      `json:"confidence"`
 	Scores     map[string]int `json:"scores"`
+	Type       DocumentType   `json:"type"`
+	Confidence float64        `json:"confidence"`
 }
 
 // Keyword sets for document classification
@@ -113,7 +113,7 @@ func Classify(rawText string) *ClassificationResult {
 	}
 
 	return &ClassificationResult{
-		Type:        docType,
+		Type:       docType,
 		Confidence: confidence,
 		Scores:     scores,
 	}

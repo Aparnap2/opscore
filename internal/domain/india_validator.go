@@ -136,9 +136,9 @@ func NewIndiaValidator() *IndiaValidator {
 
 // ValidationResult holds validation results
 type ValidationResult struct {
-	Valid   bool     `json:"valid"`
-	Errors  []string `json:"errors"`
+	Errors   []string `json:"errors"`
 	Warnings []string `json:"warnings"`
+	Valid    bool     `json:"valid"`
 }
 
 // HasErrors returns true if there are any errors

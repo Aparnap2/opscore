@@ -11,13 +11,13 @@ import (
 
 // Trust tier decay rules
 var trustDecayRules = map[domain.TrustTier]struct {
-	NoActivityDays int
 	DropTo         domain.TrustTier
+	NoActivityDays int
 }{
 	domain.TrustTierStrategic: {NoActivityDays: 180, DropTo: domain.TrustTierCore},
-	domain.TrustTierCore:       {NoActivityDays: 90, DropTo: domain.TrustTierStandard},
-	domain.TrustTierStandard:   {NoActivityDays: 60, DropTo: domain.TrustTierProbation},
-	domain.TrustTierProbation:  {NoActivityDays: 30, DropTo: domain.TrustTierProbation},
+	domain.TrustTierCore:      {NoActivityDays: 90, DropTo: domain.TrustTierStandard},
+	domain.TrustTierStandard:  {NoActivityDays: 60, DropTo: domain.TrustTierProbation},
+	domain.TrustTierProbation: {NoActivityDays: 30, DropTo: domain.TrustTierProbation},
 }
 
 // TimerTrustDecayHandler handles Timer trigger for trust battery decay
@@ -81,13 +81,13 @@ func TimerTrustDecayHandler(ctx context.Context) error {
 
 				// Log audit event
 				cosmosAdapter.AppendAuditEvent(ctx, &domain.AuditEvent{
-					Actor:       "timer_trust_decay",
-					Action:      "TRUST_DECAYED",
-					TargetType:  "vendor",
-					TargetID:    vendor.ID,
-					OldState:    string(oldTier),
-					NewState:    string(vendor.TrustBattery.Tier),
-					Timestamp:   now,
+					Actor:      "timer_trust_decay",
+					Action:     "TRUST_DECAYED",
+					TargetType: "vendor",
+					TargetID:   vendor.ID,
+					OldState:   string(oldTier),
+					NewState:   string(vendor.TrustBattery.Tier),
+					Timestamp:  now,
 				})
 
 				// Save vendor
@@ -106,13 +106,13 @@ func TimerTrustDecayHandler(ctx context.Context) error {
 			vendor.UpdatedAt = now
 
 			cosmosAdapter.AppendAuditEvent(ctx, &domain.AuditEvent{
-				Actor:       "timer_trust_decay",
-				Action:      "TRUST_PROMOTED",
-				TargetType:  "vendor",
-				TargetID:    vendor.ID,
-				OldState:    string(oldTier),
-				NewState:    string(vendor.TrustBattery.Tier),
-				Timestamp:   now,
+				Actor:      "timer_trust_decay",
+				Action:     "TRUST_PROMOTED",
+				TargetType: "vendor",
+				TargetID:   vendor.ID,
+				OldState:   string(oldTier),
+				NewState:   string(vendor.TrustBattery.Tier),
+				Timestamp:  now,
 			})
 
 			cosmosAdapter.UpsertVendor(ctx, vendor)
@@ -128,19 +128,19 @@ func TimerTrustDecayHandler(ctx context.Context) error {
 	job.UpdatedAt = time.Now()
 	job.Output = map[string]int{
 		"vendors_processed": len(vendors),
-		"degraded":         degradedCount,
-		"promoted":        promotedCount,
+		"degraded":          degradedCount,
+		"promoted":          promotedCount,
 	}
 	cosmosAdapter.UpsertJob(ctx, job)
 
 	// Log audit event
 	cosmosAdapter.AppendAuditEvent(ctx, &domain.AuditEvent{
-		Actor:       "timer_trust_decay",
-		Action:      "DECAY_COMPLETED",
-		TargetType:  "job",
-		TargetID:    jobID,
-		NewState:    "COMPLETED",
-		Timestamp:   now,
+		Actor:      "timer_trust_decay",
+		Action:     "DECAY_COMPLETED",
+		TargetType: "job",
+		TargetID:   jobID,
+		NewState:   "COMPLETED",
+		Timestamp:  now,
 	})
 
 	log.Printf("Trust decay completed: processed=%d, degraded=%d, promoted=%d",

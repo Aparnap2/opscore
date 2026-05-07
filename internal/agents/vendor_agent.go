@@ -11,10 +11,10 @@ import (
 
 // VendorAgent handles vendor onboarding workflows
 type VendorAgent struct {
-	db       providers.DBProvider
+	db        providers.DBProvider
 	validator *domain.IndiaValidator
 	scorer    *RiskScorerWrapper
-	llm      providers.LLMProvider
+	llm       providers.LLMProvider
 }
 
 // RiskScorerWrapper wraps risk scoring for agents
@@ -62,28 +62,28 @@ func NewVendorAgent(
 	llm providers.LLMProvider,
 ) *VendorAgent {
 	return &VendorAgent{
-		db:       db,
+		db:        db,
 		validator: validator,
 		scorer:    &RiskScorerWrapper{},
-		llm:     llm,
+		llm:       llm,
 	}
 }
 
 // VendorJob represents a vendor onboarding job
 type VendorJob struct {
-	TenantID    string     `json:"tenant_id"`
-	JobID     string     `json:"job_id"`
 	VendorData *VendorData `json:"vendor_data"`
+	TenantID   string      `json:"tenant_id"`
+	JobID      string      `json:"job_id"`
 }
 
 type VendorData struct {
-	Name         string   `json:"name"`
+	Name        string   `json:"name"`
 	GSTNumber   string   `json:"gst_number,omitempty"`
-	PANNumber  string   `json:"pan_number,omitempty"`
-	IFSCCode   string   `json:"ifsc_code,omitempty"`
+	PANNumber   string   `json:"pan_number,omitempty"`
+	IFSCCode    string   `json:"ifsc_code,omitempty"`
 	BankAccount string   `json:"bank_account,omitempty"`
-	Address    string   `json:"address,omitempty"`
-	Documents []string  `json:"documents,omitempty"`
+	Address     string   `json:"address,omitempty"`
+	Documents   []string `json:"documents,omitempty"`
 }
 
 // ProcessVendor handles the complete vendor onboarding workflow
@@ -98,10 +98,10 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 	riskScore := a.scorer.ComputeScore(data.GSTNumber, data.PANNumber, data.Name, data.Address)
 
 	result := map[string]any{
-		"name":         data.Name,
+		"name":        data.Name,
 		"validations": validations,
 		"risk_score":  riskScore,
-		"trust_tier": domain.TrustTierStandard,
+		"trust_tier":  domain.TrustTierStandard,
 		"needs_hitl":  riskScore >= 60 || (validations != nil && len(validations.Errors) > 0),
 	}
 
@@ -130,15 +130,15 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 		TenantID:     job.TenantID,
 		Name:         data.Name,
 		GSTNumber:    data.GSTNumber,
-		PANNumber:   data.PANNumber,
-		IFSCCode:    data.IFSCCode,
-		BankAccount: data.BankAccount,
-		RiskScore:   riskScore,
-		RiskTier:    domain.RiskTierHigh,
+		PANNumber:    data.PANNumber,
+		IFSCCode:     data.IFSCCode,
+		BankAccount:  data.BankAccount,
+		RiskScore:    riskScore,
+		RiskTier:     domain.RiskTierHigh,
 		TrustBattery: domain.TrustBattery{},
-		Approved:    riskScore < 60 && (validations == nil || len(validations.Errors) == 0),
-		CreatedAt:   time.Now(),
-		UpdatedAt:  time.Now(),
+		Approved:     riskScore < 60 && (validations == nil || len(validations.Errors) == 0),
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	if vendor.RiskScore < 30 {
@@ -156,9 +156,9 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 		ID:           job.JobID,
 		TenantID:     job.TenantID,
 		WorkflowType: domain.WorkflowVendorOnboarding,
-		Status:      domain.JobStatusCompleted,
-		UpdatedAt:   time.Now(),
-		Output:     result,
+		Status:       domain.JobStatusCompleted,
+		UpdatedAt:    time.Now(),
+		Output:       result,
 	}
 
 	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
@@ -169,11 +169,11 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 	if result["needs_hitl"].(bool) {
 		hitlReq := &domain.HITLRequest{
 			ID:        fmt.Sprintf("hitl-%s", job.JobID),
-			TenantID: job.TenantID,
-			JobID:   job.JobID,
-			Type:    "VENDOR_APPROVAL",
-			Message: fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
-			Status:  "PENDING",
+			TenantID:  job.TenantID,
+			JobID:     job.JobID,
+			Type:      "VENDOR_APPROVAL",
+			Message:   fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
+			Status:    "PENDING",
 			CreatedAt: time.Now(),
 		}
 

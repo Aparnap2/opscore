@@ -14,17 +14,17 @@ type OCRProvider interface {
 }
 
 type OCRResult struct {
-	Text       string                 `json:"text"`
-	Tables     []TableData            `json:"tables,omitempty"`
-	KeyValues  map[string]string      `json:"key_values,omitempty"`
-	Confidence float64                `json:"confidence"`
-	Language   string                 `json:"language"`
-	Provider   string                 `json:"provider"`
+	KeyValues  map[string]string `json:"key_values,omitempty"`
+	Text       string            `json:"text"`
+	Language   string            `json:"language"`
+	Provider   string            `json:"provider"`
+	Tables     []TableData       `json:"tables,omitempty"`
+	Confidence float64           `json:"confidence"`
 }
 
 type TableData struct {
 	Rows    [][]string `json:"rows"`
-	Headers []string  `json:"headers"`
+	Headers []string   `json:"headers"`
 }
 
 type LLMProvider interface {
@@ -46,9 +46,9 @@ type StorageProvider interface {
 }
 
 type BlobItem struct {
+	Modified time.Time `json:"modified"`
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
-	Modified time.Time `json:"modified"`
 }
 
 type QueueProvider interface {
@@ -59,9 +59,9 @@ type QueueProvider interface {
 }
 
 type QueueMessage struct {
-	ID        string `json:"id"`
-	Body      string `json:"body"`
-	DequeueCount int  `json:"dequeue_count"`
+	ID           string `json:"id"`
+	Body         string `json:"body"`
+	DequeueCount int    `json:"dequeue_count"`
 }
 
 type DBProvider interface {
@@ -90,9 +90,9 @@ type DBProvider interface {
 }
 
 type VectorMatch struct {
-	ID        string                 `json:"id"`
-	Score     float64                `json:"score"`
-	Payload   map[string]interface{} `json:"payload"`
+	Payload map[string]interface{} `json:"payload"`
+	ID      string                 `json:"id"`
+	Score   float64                `json:"score"`
 }
 
 type HITLProvider interface {

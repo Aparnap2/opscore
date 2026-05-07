@@ -16,10 +16,10 @@ import (
 
 // ComplianceAgent handles compliance monitoring workflows
 type ComplianceAgent struct {
-	db          providers.DBProvider
-	llm         providers.LLMProvider
-	validator   *domain.IndiaValidator
-	httpClient  *http.Client
+	db         providers.DBProvider
+	llm        providers.LLMProvider
+	validator  *domain.IndiaValidator
+	httpClient *http.Client
 }
 
 // ComplianceJob represents a compliance processing job
@@ -30,9 +30,9 @@ type ComplianceJob struct {
 	SourceURL     string           `json:"source_url,omitempty"`
 	BlobURL       string           `json:"blob_url,omitempty"`
 	Content       string           `json:"content,omitempty"`
-	Items         []ComplianceItem `json:"items,omitempty"`
-	JobType       string           `json:"job_type"` // "scrape", "analyze", "gap_analysis"
+	JobType       string           `json:"job_type"`
 	CorrelationID string           `json:"correlation_id,omitempty"`
+	Items         []ComplianceItem `json:"items,omitempty"`
 }
 
 // ComplianceItem represents a compliance update item
@@ -58,18 +58,18 @@ func NewComplianceAgent(
 
 // ComplianceSource represents a regulatory source
 type ComplianceSource struct {
-	Name    string `json:"name"`
-	URL    string `json:"url"`
-	Type   string `json:"type"` // rss, html, api
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Type string `json:"type"` // rss, html, api
 }
 
 // ScrapeResult represents the result of a compliance scrape
 type ScrapeResult struct {
-	Source     string   `json:"source"`
-	URL       string   `json:"url"`
-	Content   string   `json:"content"`
-	Chunks    []string `json:"chunks"`
 	Timestamp time.Time `json:"timestamp"`
+	Source    string    `json:"source"`
+	URL       string    `json:"url"`
+	Content   string    `json:"content"`
+	Chunks    []string  `json:"chunks"`
 }
 
 // FetchRegulatoryUpdate fetches updates from a regulatory source
@@ -88,7 +88,7 @@ func (a *ComplianceAgent) FetchRegulatoryUpdate(ctx context.Context, source *Com
 	}
 
 	result := &ScrapeResult{
-		Source:     source.Name,
+		Source:    source.Name,
 		URL:       source.URL,
 		Content:   string(body),
 		Timestamp: time.Now(),
@@ -133,13 +133,13 @@ func (a *ComplianceAgent) StoreComplianceChunks(ctx context.Context, result *Scr
 		doc := &domain.Document{
 			ID:          fmt.Sprintf("%s-%s-%d", result.Source, result.Timestamp.Format("20060102"), i),
 			TenantID:    "compliance",
-			JobID:      "scrape",
-			Type:       "REGULATORY",
-			FileName:   fmt.Sprintf("%s-chunk-%d", result.Source, i),
+			JobID:       "scrape",
+			Type:        "REGULATORY",
+			FileName:    fmt.Sprintf("%s-chunk-%d", result.Source, i),
 			StoragePath: result.URL,
-			Status:     "INDEXED",
-			Extracted:  map[string]any{"chunk": chunk},
-			CreatedAt:  time.Now(),
+			Status:      "INDEXED",
+			Extracted:   map[string]any{"chunk": chunk},
+			CreatedAt:   time.Now(),
 		}
 
 		if err := a.db.UpsertDocument(ctx, doc); err != nil {
@@ -231,10 +231,10 @@ func (a *ComplianceAgent) CreateTicket(ctx context.Context, tenantID, title, des
 	ticket := &domain.HITLRequest{
 		ID:        fmt.Sprintf("ticket-%d", time.Now().Unix()),
 		TenantID:  tenantID,
-		JobID:    title,
-		Type:     "COMPLIANCE_TICKET",
-		Message: description,
-		Status:  severity, // Use as severity marker
+		JobID:     title,
+		Type:      "COMPLIANCE_TICKET",
+		Message:   description,
+		Status:    severity, // Use as severity marker
 		CreatedAt: time.Now(),
 	}
 
@@ -292,8 +292,8 @@ func (a *ComplianceAgent) ProcessCompliance(ctx context.Context, job *Compliance
 					FileName:    fmt.Sprintf("chunk-%d", i),
 					StoragePath: job.BlobURL,
 					Status:      "INDEXED",
-					Extracted:  map[string]any{"chunk": chunk},
-					CreatedAt:  time.Now(),
+					Extracted:   map[string]any{"chunk": chunk},
+					CreatedAt:   time.Now(),
 				}
 
 				if err := a.db.UpsertDocument(ctx, doc); err != nil {

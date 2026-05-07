@@ -33,25 +33,25 @@ func NewLLMAdapter(config LLMConfig) *LLMAdapter {
 
 	return &LLMAdapter{
 		client: &http.Client{Timeout: 120 * time.Second},
-		config:  config,
+		config: config,
 	}
 }
 
 // ExtractFields uses the LLM to extract structured fields from text
 func (l *LLMAdapter) ExtractFields(ctx context.Context, text string, schema any) (json.RawMessage, float64, error) {
 	type request struct {
+		Schema   any                     `json:"schema,omitempty"`
+		Model    string                  `json:"model"`
 		Messages []providers.ChatMessage `json:"messages"`
-		Schema    any                     `json:"schema,omitempty"`
-		Model     string                  `json:"model"`
 	}
 
 	type response struct {
-		Content  string  `json:"content"`
+		Content      string `json:"content"`
 		FinishReason string `json:"finish_reason"`
-		Usage struct {
+		Usage        struct {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens     int `json:"total_tokens"`
+			TotalTokens      int `json:"total_tokens"`
 		} `json:"usage"`
 	}
 
@@ -116,8 +116,8 @@ func (l *LLMAdapter) ExtractFields(ctx context.Context, text string, schema any)
 // Reason uses the LLM to reason about a prompt
 func (l *LLMAdapter) Reason(ctx context.Context, prompt string) (string, error) {
 	type request struct {
+		Model    string                  `json:"model"`
 		Messages []providers.ChatMessage `json:"messages"`
-		Model    string                 `json:"model"`
 	}
 
 	type response struct {
@@ -174,8 +174,8 @@ func (l *LLMAdapter) Reason(ctx context.Context, prompt string) (string, error) 
 // Chat sends a chat completion request
 func (l *LLMAdapter) Chat(ctx context.Context, messages []providers.ChatMessage) (string, error) {
 	type request struct {
+		Model    string                  `json:"model"`
 		Messages []providers.ChatMessage `json:"messages"`
-		Model    string                   `json:"model"`
 	}
 
 	type response struct {

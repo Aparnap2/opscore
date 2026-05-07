@@ -19,9 +19,9 @@ var (
 
 // RiskResult holds the computed risk assessment for a vendor
 type RiskResult struct {
-	Score int      `json:"score"`
 	Tier  RiskTier `json:"tier"`
 	Flags []string `json:"flags"`
+	Score int      `json:"score"`
 }
 
 // ValidateGST checks if the given GST number is valid
