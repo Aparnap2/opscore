@@ -20,9 +20,11 @@ type CosmosConfig struct {
 
 // CosmosAdapter implements providers.DBProvider for Azure Cosmos DB
 type CosmosAdapter struct {
-	client      *azcosmos.Client
-	database    string
-	databaseID  string
+	client     *azcosmos.Client
+	database   string
+	databaseID string
+	// partitionKeyPath defines the partition key for all collections
+	partitionKeyPath string
 }
 
 // NewCosmosAdapter creates a new Azure Cosmos DB adapter
@@ -46,11 +48,46 @@ func NewCosmosAdapter(config CosmosConfig) (*CosmosAdapter, error) {
 		_ = err
 	}
 
-	return &CosmosAdapter{
-		client:     client,
-		database:   config.DatabaseName,
-		databaseID: config.DatabaseName,
-	}, nil
+	adapter := &CosmosAdapter{
+		client:            client,
+		database:          config.DatabaseName,
+		databaseID:        config.DatabaseName,
+		partitionKeyPath:  "/tenant_id",
+	}
+
+	// Ensure required containers exist with proper partition keys
+	if err := adapter.ensureContainers(context.Background()); err != nil {
+		// Log but don't fail - containers might already exist
+		_ = err
+	}
+
+	return adapter, nil
+}
+
+// ensureContainers creates all required collections with /tenant_id partition key
+func (c *CosmosAdapter) ensureContainers(ctx context.Context) error {
+	containers := []string{"jobs", "vendors", "documents", "audit_events", "hitl_requests"}
+
+	for _, name := range containers {
+		db, err := c.client.NewDatabase(c.databaseID)
+		if err != nil {
+			continue
+		}
+		_, _ = db.CreateContainer(ctx,
+			azcosmos.ContainerProperties{
+				ID: name,
+				PartitionKeyDefinition: azcosmos.PartitionKeyDefinition{
+					Paths: []string{c.partitionKeyPath},
+				},
+			}, nil)
+		// Ignore errors - container may already exist
+	}
+	return nil
+}
+
+// getPartitionKey returns the partition key for an entity using tenant_id
+func (c *CosmosAdapter) getPartitionKey(tenantID string) azcosmos.PartitionKey {
+	return azcosmos.NewPartitionKeyString(tenantID)
 }
 
 // getContainer returns a container client
@@ -59,9 +96,14 @@ func (c *CosmosAdapter) getContainer(containerName string) (*azcosmos.ContainerC
 }
 
 // UpsertJob inserts or updates a job document
+// Uses tenant_id as partition key
 func (c *CosmosAdapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 	if c.client == nil {
 		return fmt.Errorf("cosmos client not initialized")
+	}
+
+	if job.TenantID == "" {
+		return fmt.Errorf("job missing tenant_id")
 	}
 
 	container, err := c.getContainer("jobs")
@@ -75,10 +117,10 @@ func (c *CosmosAdapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 		return fmt.Errorf("marshaling job: %w", err)
 	}
 
-	// Partition key is the job ID
-	pk := azcosmos.NewPartitionKeyString(job.ID)
+	// Use tenant_id as partition key
+	pk := c.getPartitionKey(job.TenantID)
 
-	// Upsert the item
+	// Upsert the item (UpsertItem handles create or replace)
 	_, err = container.UpsertItem(ctx, pk, jobJSON, nil)
 	if err != nil {
 		return fmt.Errorf("upserting job: %w", err)
@@ -88,44 +130,71 @@ func (c *CosmosAdapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 }
 
 // GetJob retrieves a job by ID
+// Uses tenant_id for partition lookup
 func (c *CosmosAdapter) GetJob(ctx context.Context, id string) (*domain.Job, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
 	}
 
+	// First, we need to find the job by ID to get its tenant_id
+	// This is a limitation when using tenant_id as partition key
 	container, err := c.getContainer("jobs")
 	if err != nil {
 		return nil, fmt.Errorf("getting container: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(id)
-
-	// Read item
-	resp, err := container.ReadItem(ctx, pk, id, nil)
-	if err != nil {
-		return nil, fmt.Errorf("reading job: %w", err)
+	// Query to find by job ID (Cosmos allows querying by id without partition key)
+	query := "SELECT * FROM c WHERE c.id = @id"
+	params := []azcosmos.QueryParameter{
+		{Name: "@id", Value: id},
 	}
 
-	var job domain.Job
-	if err := json.Unmarshal(resp.Value, &job); err != nil {
-		return nil, fmt.Errorf("unmarshaling job: %w", err)
+	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+
+	var job *domain.Job
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("querying job: %w", err)
+		}
+
+		for _, item := range resp.Items {
+			var j domain.Job
+			if err := json.Unmarshal(item, &j); err != nil {
+				continue
+			}
+			job = &j
+			break
+		}
+		if job != nil {
+			break
+		}
 	}
 
-	return &job, nil
+	if job == nil {
+		return nil, fmt.Errorf("job not found: %s", id)
+	}
+
+	return job, nil
 }
 
 // ListJobs retrieves jobs for a tenant with optional filters
+// Uses tenant_id partition key
 func (c *CosmosAdapter) ListJobs(ctx context.Context, tenantID string, workflowType domain.WorkflowType, status domain.JobStatus) ([]*domain.Job, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
 	}
 
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
+	}
+
 	container, err := c.getContainer("jobs")
 	if err != nil {
 		return nil, fmt.Errorf("getting container: %w", err)
 	}
 
-	// Build query
+	// Build query - always filter by tenant_id (partition key)
 	query := "SELECT * FROM c WHERE c.tenant_id = @tenantID"
 	if workflowType != "" {
 		query += " AND c.workflow_type = @workflowType"
@@ -144,7 +213,8 @@ func (c *CosmosAdapter) ListJobs(ctx context.Context, tenantID string, workflowT
 		params = append(params, azcosmos.QueryParameter{Name: "@status", Value: string(status)})
 	}
 
-	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+	// Use tenant_id as partition key for efficient querying
+	pager := container.NewQueryItemsPager(query, c.getPartitionKey(tenantID), &azcosmos.QueryOptions{QueryParameters: params})
 
 	var jobs []*domain.Job
 	for pager.More() {
@@ -166,9 +236,14 @@ func (c *CosmosAdapter) ListJobs(ctx context.Context, tenantID string, workflowT
 }
 
 // UpsertVendor inserts or updates a vendor document
+// Uses tenant_id as partition key
 func (c *CosmosAdapter) UpsertVendor(ctx context.Context, vendor *domain.Vendor) error {
 	if c.client == nil {
 		return fmt.Errorf("cosmos client not initialized")
+	}
+
+	if vendor.TenantID == "" {
+		return fmt.Errorf("vendor missing tenant_id")
 	}
 
 	container, err := c.getContainer("vendors")
@@ -181,7 +256,7 @@ func (c *CosmosAdapter) UpsertVendor(ctx context.Context, vendor *domain.Vendor)
 		return fmt.Errorf("marshaling vendor: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(vendor.ID)
+	pk := c.getPartitionKey(vendor.TenantID)
 	_, err = container.UpsertItem(ctx, pk, vendorJSON, nil)
 	if err != nil {
 		return fmt.Errorf("upserting vendor: %w", err)
@@ -191,6 +266,7 @@ func (c *CosmosAdapter) UpsertVendor(ctx context.Context, vendor *domain.Vendor)
 }
 
 // GetVendor retrieves a vendor by ID
+// Queries by ID since partition key is tenant_id
 func (c *CosmosAdapter) GetVendor(ctx context.Context, id string) (*domain.Vendor, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
@@ -201,24 +277,49 @@ func (c *CosmosAdapter) GetVendor(ctx context.Context, id string) (*domain.Vendo
 		return nil, fmt.Errorf("getting container: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(id)
-	resp, err := container.ReadItem(ctx, pk, id, nil)
-	if err != nil {
-		return nil, fmt.Errorf("reading vendor: %w", err)
+	query := "SELECT * FROM c WHERE c.id = @id"
+	params := []azcosmos.QueryParameter{
+		{Name: "@id", Value: id},
 	}
 
-	var vendor domain.Vendor
-	if err := json.Unmarshal(resp.Value, &vendor); err != nil {
-		return nil, fmt.Errorf("unmarshaling vendor: %w", err)
+	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+
+	var vendor *domain.Vendor
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("querying vendor: %w", err)
+		}
+
+		for _, item := range resp.Items {
+			var v domain.Vendor
+			if err := json.Unmarshal(item, &v); err != nil {
+				continue
+			}
+			vendor = &v
+			break
+		}
+		if vendor != nil {
+			break
+		}
 	}
 
-	return &vendor, nil
+	if vendor == nil {
+		return nil, fmt.Errorf("vendor not found: %s", id)
+	}
+
+	return vendor, nil
 }
 
 // ListVendors retrieves all vendors for a tenant
+// Uses tenant_id partition key
 func (c *CosmosAdapter) ListVendors(ctx context.Context, tenantID string) ([]*domain.Vendor, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
+	}
+
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
 	}
 
 	container, err := c.getContainer("vendors")
@@ -231,7 +332,7 @@ func (c *CosmosAdapter) ListVendors(ctx context.Context, tenantID string) ([]*do
 		{Name: "@tenantID", Value: tenantID},
 	}
 
-	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+	pager := container.NewQueryItemsPager(query, c.getPartitionKey(tenantID), &azcosmos.QueryOptions{QueryParameters: params})
 
 	var vendors []*domain.Vendor
 	for pager.More() {
@@ -253,9 +354,14 @@ func (c *CosmosAdapter) ListVendors(ctx context.Context, tenantID string) ([]*do
 }
 
 // UpsertDocument inserts or updates a document record
+// Uses tenant_id as partition key
 func (c *CosmosAdapter) UpsertDocument(ctx context.Context, doc *domain.Document) error {
 	if c.client == nil {
 		return fmt.Errorf("cosmos client not initialized")
+	}
+
+	if doc.TenantID == "" {
+		return fmt.Errorf("document missing tenant_id")
 	}
 
 	container, err := c.getContainer("documents")
@@ -268,7 +374,7 @@ func (c *CosmosAdapter) UpsertDocument(ctx context.Context, doc *domain.Document
 		return fmt.Errorf("marshaling document: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(doc.ID)
+	pk := c.getPartitionKey(doc.TenantID)
 	_, err = container.UpsertItem(ctx, pk, docJSON, nil)
 	if err != nil {
 		return fmt.Errorf("upserting document: %w", err)
@@ -278,6 +384,7 @@ func (c *CosmosAdapter) UpsertDocument(ctx context.Context, doc *domain.Document
 }
 
 // GetDocument retrieves a document by ID
+// Queries by ID since partition key is tenant_id
 func (c *CosmosAdapter) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
@@ -288,24 +395,49 @@ func (c *CosmosAdapter) GetDocument(ctx context.Context, id string) (*domain.Doc
 		return nil, fmt.Errorf("getting container: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(id)
-	resp, err := container.ReadItem(ctx, pk, id, nil)
-	if err != nil {
-		return nil, fmt.Errorf("reading document: %w", err)
+	query := "SELECT * FROM c WHERE c.id = @id"
+	params := []azcosmos.QueryParameter{
+		{Name: "@id", Value: id},
 	}
 
-	var doc domain.Document
-	if err := json.Unmarshal(resp.Value, &doc); err != nil {
-		return nil, fmt.Errorf("unmarshaling document: %w", err)
+	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+
+	var doc *domain.Document
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("querying document: %w", err)
+		}
+
+		for _, item := range resp.Items {
+			var d domain.Document
+			if err := json.Unmarshal(item, &d); err != nil {
+				continue
+			}
+			doc = &d
+			break
+		}
+		if doc != nil {
+			break
+		}
 	}
 
-	return &doc, nil
+	if doc == nil {
+		return nil, fmt.Errorf("document not found: %s", id)
+	}
+
+	return doc, nil
 }
 
 // UpsertHITLRequest inserts or updates a HITL request
+// Uses tenant_id as partition key
 func (c *CosmosAdapter) UpsertHITLRequest(ctx context.Context, req *domain.HITLRequest) error {
 	if c.client == nil {
 		return fmt.Errorf("cosmos client not initialized")
+	}
+
+	if req.TenantID == "" {
+		return fmt.Errorf("HITL request missing tenant_id")
 	}
 
 	container, err := c.getContainer("hitl_requests")
@@ -318,7 +450,7 @@ func (c *CosmosAdapter) UpsertHITLRequest(ctx context.Context, req *domain.HITLR
 		return fmt.Errorf("marshaling HITL request: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(req.ID)
+	pk := c.getPartitionKey(req.TenantID)
 	_, err = container.UpsertItem(ctx, pk, reqJSON, nil)
 	if err != nil {
 		return fmt.Errorf("upserting HITL request: %w", err)
@@ -328,6 +460,7 @@ func (c *CosmosAdapter) UpsertHITLRequest(ctx context.Context, req *domain.HITLR
 }
 
 // GetHITLRequest retrieves a HITL request by ID
+// Queries by ID since partition key is tenant_id
 func (c *CosmosAdapter) GetHITLRequest(ctx context.Context, id string) (*domain.HITLRequest, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
@@ -338,24 +471,49 @@ func (c *CosmosAdapter) GetHITLRequest(ctx context.Context, id string) (*domain.
 		return nil, fmt.Errorf("getting container: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(id)
-	resp, err := container.ReadItem(ctx, pk, id, nil)
-	if err != nil {
-		return nil, fmt.Errorf("reading HITL request: %w", err)
+	query := "SELECT * FROM c WHERE c.id = @id"
+	params := []azcosmos.QueryParameter{
+		{Name: "@id", Value: id},
 	}
 
-	var req domain.HITLRequest
-	if err := json.Unmarshal(resp.Value, &req); err != nil {
-		return nil, fmt.Errorf("unmarshaling HITL request: %w", err)
+	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+
+	var req *domain.HITLRequest
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("querying HITL request: %w", err)
+		}
+
+		for _, item := range resp.Items {
+			var r domain.HITLRequest
+			if err := json.Unmarshal(item, &r); err != nil {
+				continue
+			}
+			req = &r
+			break
+		}
+		if req != nil {
+			break
+		}
 	}
 
-	return &req, nil
+	if req == nil {
+		return nil, fmt.Errorf("HITL request not found: %s", id)
+	}
+
+	return req, nil
 }
 
 // ListPendingHITL retrieves all pending HITL requests for a tenant
+// Uses tenant_id partition key
 func (c *CosmosAdapter) ListPendingHITL(ctx context.Context, tenantID string) ([]*domain.HITLRequest, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
+	}
+
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
 	}
 
 	container, err := c.getContainer("hitl_requests")
@@ -368,7 +526,7 @@ func (c *CosmosAdapter) ListPendingHITL(ctx context.Context, tenantID string) ([
 		{Name: "@tenantID", Value: tenantID},
 	}
 
-	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+	pager := container.NewQueryItemsPager(query, c.getPartitionKey(tenantID), &azcosmos.QueryOptions{QueryParameters: params})
 
 	var requests []*domain.HITLRequest
 	for pager.More() {
@@ -390,9 +548,14 @@ func (c *CosmosAdapter) ListPendingHITL(ctx context.Context, tenantID string) ([
 }
 
 // AppendAuditEvent appends an audit event
+// Uses tenant_id as partition key, timestamp as item ID for uniqueness
 func (c *CosmosAdapter) AppendAuditEvent(ctx context.Context, event *domain.AuditEvent) error {
 	if c.client == nil {
 		return fmt.Errorf("cosmos client not initialized")
+	}
+
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
 	}
 
 	container, err := c.getContainer("audit_events")
@@ -405,7 +568,9 @@ func (c *CosmosAdapter) AppendAuditEvent(ctx context.Context, event *domain.Audi
 		return fmt.Errorf("marshaling audit event: %w", err)
 	}
 
-	pk := azcosmos.NewPartitionKeyString(event.Timestamp.Format(time.RFC3339Nano))
+	// Use tenant_id as partition key
+	pk := c.getPartitionKey(event.TenantID)
+
 	_, err = container.CreateItem(ctx, pk, eventJSON, nil)
 	if err != nil {
 		return fmt.Errorf("creating audit event: %w", err)
@@ -415,9 +580,14 @@ func (c *CosmosAdapter) AppendAuditEvent(ctx context.Context, event *domain.Audi
 }
 
 // ListAuditEvents retrieves audit events for a target
+// Uses tenant_id partition key
 func (c *CosmosAdapter) ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
+	}
+
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
 	}
 
 	container, err := c.getContainer("audit_events")
@@ -444,7 +614,7 @@ func (c *CosmosAdapter) ListAuditEvents(ctx context.Context, tenantID, targetTyp
 		params = append(params, azcosmos.QueryParameter{Name: "@limit", Value: limit})
 	}
 
-	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+	pager := container.NewQueryItemsPager(query, c.getPartitionKey(tenantID), &azcosmos.QueryOptions{QueryParameters: params})
 
 	var events []*domain.AuditEvent
 	for pager.More() {

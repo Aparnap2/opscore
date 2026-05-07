@@ -40,6 +40,7 @@ const (
 )
 
 type AuditEvent struct {
+	TenantID      string    `json:"tenant_id"`
 	Actor         string    `json:"actor"`
 	Action        string    `json:"action"`
 	TargetType    string    `json:"target_type"`
