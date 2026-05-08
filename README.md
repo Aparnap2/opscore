@@ -1,175 +1,153 @@
-# OpsCore - Agentic Internal Operations Platform
+# OpsCore v2.0 - Agentic Internal Operations Platform
 
-A production-grade internal operations platform for mid-size B2B companies in India. Automates document ingestion, compliance monitoring, and vendor onboarding with AI agents.
+A production-grade internal operations platform for mid-size B2B companies in India. Built with Go and Azure serverless, it automates document ingestion, compliance monitoring, and vendor onboarding with AI agents.
 
 ## Features
 
 ### Workflow 1: Document Ingestion
-- PDF upload via drag-drop UI or API
+- PDF/Image upload via API
 - Automatic document classification (Invoice, Contract, GST Notice, Purchase Order)
-- Structured field extraction using Docling + LLM
+- Structured field extraction using Sarvam AI OCR + LLM
 - Confidence scoring per field
-- HITL (Human-In-The-Loop) review for low-confidence or high-value items
-- Auto-sync to QuickBooks
+- HITL (Human-In-The-Loop) review via Slack for low-confidence or high-value items
 
 ### Workflow 2: Compliance Monitoring
 - Scheduled regulatory scraper (SEBI, RBI, GST)
-- Semantic chunking and vector storage (pgvector)
+- Semantic chunking and vector storage (Cosmos DB)
 - Gap analysis with hybrid search
-- RAGAS faithfulness scoring (≥0.85)
 - Department owner assignment
 - Slack notifications
 
 ### Workflow 3: Vendor Onboarding
-- Vendor request form
+- Vendor request form via API or Slack
 - Document verification (GST, PAN, Bank details)
 - Deterministic risk scoring
 - Tiered approval workflow (Slack)
 - Trust Battery state machine
-- Auto-sync to QuickBooks
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| API | FastAPI + Python 3.12 |
-| Database | PostgreSQL + pgvector |
-| Task Queue | ARQ + Redis |
-| Knowledge Graph | Neo4j + Graphiti |
-| LLM | Ollama / OpenAI / Claude |
-| Agents | LangGraph |
-| OCR | Docling |
+| Functions | Go + Azure Functions Custom Handler |
+| Database | Azure Cosmos DB (SQL API) |
+| Storage | Azure Blob Storage |
+| Queue | Azure Queue Storage |
+| OCR/LLM | Sarvam AI |
+| HITL UI | Slack Block Kit |
+| Observability | Azure App Insights |
+| IaC | Bicep |
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   React UI  │────│  FastAPI   │────│   PostgreSQL │
-│   Slack     │     │   (Async)  │     │  + pgvector │
+│   Slack     │────│  Azure      │────│   Cosmos DB │
+│  (HITL UI)  │     │  Functions  │     │  (SQL API)  │
 └─────────────┘     └──────┬──────┘     └─────────────┘
-                          │
-                   ┌────▼────┐
-                   │   ARQ   │
-                   │  Worker │
-                   └────┬────┘
-                        │
-         ┌──────────────┼──────────────┐
-         ▼              ▼              ▼
-   ┌──────────┐  ┌──────────┐  ┌──────────┐
-   │ Document │  │Compliance│  │ Vendor  │
-   │ Ingestion│  │ Monitoring│  │Onboarding│
-   └──────────┘  └──────────┘  └──────────┘
+                           │
+                    ┌────▼────┐
+                    │  Queue  │
+                    │ Storage │
+                    └────┬────┘
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+    ┌──────────┐  ┌──────────┐  ┌──────────┐
+    │ Document │  │Compliance│  │ Vendor  │
+    │ Ingestion│  │ Monitoring│  │Onboarding│
+    └──────────┘  └──────────┘  └──────────┘
 ```
 
-## Quick Start
+## Azure Deployment
 
 ### Prerequisites
-- Docker + Docker Compose
-- Python 3.12+
-- uv (recommended)
+- Azure subscription
+- Azure CLI installed
+- Go 1.21+
 
-### 1. Clone and Setup
+### Infrastructure Setup
 ```bash
-git clone https://github.com/Aparnap2/opscore.git
-cd opscore
-cp .env.example .env
+cd infra
+az group create --location centralindia --name opscore-prod
+az deployment group create --resource-group opscore-prod --template-file main.bicep
 ```
 
-### 2. Start Infrastructure
+### Deploy Functions
 ```bash
-docker compose up -d postgres redis neo4j
-```
+# Build Linux binary
+GOOS=linux GOARCH=amd64 go build -o handler ./cmd/functions
 
-### 3. Install Dependencies
-```bash
-uv pip install -r requirements.txt
-```
-
-### 4. Run Migrations
-```bash
-docker exec opscore-postgres psql -U admin -d opscore -f /path/to/migrations/001_add_pgvector.sql
-```
-
-### 5. Start API
-```bash
-uvicorn apps.api.main:app --port 8000
-```
-
-### 6. Start Worker (separate terminal)
-```bash
-arq apps.api.worker.WorkerSettings
+# Deploy (creates or updates function app)
+func azure functionapp publish opscore-functions-linux --resource-group opscore-prod
 ```
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection | postgresql://admin:password@localhost:5434/opscore |
-| `REDIS_URL` | Redis connection | redis://localhost:6380/0 |
-| `NEO4J_URI` | Neo4j bolt URI | bolt://localhost:7688 |
-| `JWT_SECRET` | JWT signing secret | change-me-in-production |
-| `LLM_API_KEY` | OpenAI/Claude API key | - |
-| `OLLAMA_BASE_URL` | Ollama endpoint | https://ollama.com |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `AzureWebJobsStorage` | Azure Storage connection string | Yes |
+| `COSMOS_ENDPOINT` | Cosmos DB endpoint URL | Yes |
+| `COSMOS_KEY` | Cosmos DB master key | Yes |
+| `COSMOS_DATABASE` | Database name (default: opscore) | No |
+| `SLACK_SIGNING_SECRET` | Slack signing secret | No |
+| `SLACK_BOT_TOKEN` | Slack bot token for HITL | No |
+| `APPINSIGHTS_INSTRUMENTATIONKEY` | App Insights key | No |
 
 ## API Endpoints
 
-### Health
-- `GET /health` - Basic health check
-- `GET /health/live` - Liveness probe
-- `GET /health/ready` - Readiness probe
+All endpoints (except /health) require `x-functions-key` header.
 
-### Auth
-- `POST /api/v1/auth/register` - Register tenant + admin
-- `POST /api/v1/auth/login` - Get access token
-- `GET /api/v1/auth/me` - Current user info
+### Health
+- `GET /api/health` - Basic health check (anonymous)
 
 ### Documents
-- `POST /api/v1/documents/ingest` - Upload PDF
-- `GET /api/v1/documents/jobs/{id}/status` - Job status
-- `GET /api/v1/documents/extracted/{id}` - Extracted data
+- `POST /api/upload` - Upload PDF/Image
+- `GET /api/jobs/{id}` - Job status
 
 ### Vendors
-- `POST /api/v1/vendors/onboard` - Create vendor request
-- `GET /api/v1/vendors` - List vendors
+- `POST /api/vendors` - Create vendor request
+- `GET /api/vendors/{id}` - Vendor status
 
-### Compliance
-- `GET /api/v1/compliance/regulations` - List regulations
-- `POST /api/v1/compliance/scrape` - Trigger scrape
-- `GET /api/v1/compliance/gaps` - List gaps
-
-### HITL
-- `GET /api/v1/hitl/queue` - Pending items
-- `POST /api/v1/hitl/queue/{id}/approve` - Approve
-- `POST /api/v1/hitl/queue/{id}/reject` - Reject
-
-## Testing
-
-```bash
-# Run all tests
-pytest tests/
-
-# Run specific test
-pytest tests/e2e/test_full_integration.py -v
-```
+### Slack
+- `POST /api/slack/webhook` - Slack events & interactive callbacks
 
 ## Project Structure
 
 ```
 opscore/
-├── apps/
-│   └── api/
-│       ├── api/v1/routes/    # API endpoints
-│       ├── agents/           # LangGraph agents
-│       ├── services/        # Business logic
-│       ├── workflows/       # ARQ tasks
-│       ├── integrations/     # Slack, QuickBooks
-│       ├── db/             # SQLAlchemy models
-│       └── observability/   # Langfuse
-├── tests/
-│   ├── e2e/               # End-to-end tests
-│   └── unit/               # Unit tests
-├── config/                 # Configuration
-└── docker-compose.yml      # Infrastructure
+├── cmd/functions/           # Azure Functions entrypoint
+│   ├── main.go             # Custom handler server
+│   └── handlers/           # HTTP, Queue, Timer handlers
+├── internal/
+│   ├── domain/             # Business entities & validation
+│   ├── adapters/           # Azure, Sarvam, Slack integrations
+│   ├── agents/             # Document, Vendor, Compliance agents
+│   └── providers/          # Interface abstractions
+├── tests/                   # Unit & E2E tests
+├── infra/                   # Bicep infrastructure
+├── HttpHealth/             # Function definition
+├── HttpUpload/             # Function definition
+├── HttpJobStatus/         # Function definition
+├── HttpSlackWebhook/      # Function definition
+├── QueueDocument/         # Function definition
+├── QueueVendor/           # Function definition
+├── QueueCompliance/       # Function definition
+├── TimerScraper/          # Function definition
+└── TimerTrustDecay/       # Function definition
+```
+
+## Testing
+
+```bash
+# Run unit tests
+go test ./...
+
+# Run E2E tests (requires Azure credentials)
+go test -tags=e2e ./tests/...
+
+# Local function emulation
+func start
 ```
 
 ## License
