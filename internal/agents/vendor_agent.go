@@ -72,22 +72,21 @@ func NewVendorAgent(
 // VendorJob represents a vendor onboarding job
 type VendorJob struct {
 	VendorData *VendorData `json:"vendor_data"`
-	TenantID   string      `json:"tenant_id"`
-	JobID      string      `json:"job_id"`
+	TenantID  string      `json:"tenant_id"`
+	JobID    string      `json:"job_id"`
 }
 
 type VendorData struct {
 	Name        string   `json:"name"`
-	GSTNumber   string   `json:"gst_number,omitempty"`
+	GSTNumber    string   `json:"gst_number,omitempty"`
 	PANNumber   string   `json:"pan_number,omitempty"`
 	IFSCCode    string   `json:"ifsc_code,omitempty"`
 	BankAccount string   `json:"bank_account,omitempty"`
-	Address     string   `json:"address,omitempty"`
-	Documents   []string `json:"documents,omitempty"`
+	Address    string   `json:"address,omitempty"`
+	Documents  []string `json:"documents,omitempty"`
 }
 
 // ProcessVendor handles the complete vendor onboarding workflow
-// TOOL: process_vendor
 func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[string]any, error) {
 	data := job.VendorData
 
@@ -101,7 +100,7 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 		"name":        data.Name,
 		"validations": validations,
 		"risk_score":  riskScore,
-		"trust_tier":  domain.TrustTierStandard,
+		"trust_tier": domain.TrustTierStandard,
 		"needs_hitl":  riskScore >= 60 || (validations != nil && len(validations.Errors) > 0),
 	}
 
@@ -117,7 +116,7 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 	// Determine trust battery
 	trustTier := domain.TrustTierProbation
 	if riskScore < 30 && (validations == nil || len(validations.Errors) == 0) {
-		trustTier = domain.TrustTierCore
+		trustTier = domain.TrustTierPreferred
 	} else if riskScore < 60 {
 		trustTier = domain.TrustTierStandard
 	}
@@ -132,13 +131,13 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 		GSTNumber:    data.GSTNumber,
 		PANNumber:    data.PANNumber,
 		IFSCCode:     data.IFSCCode,
-		BankAccount:  data.BankAccount,
+		BankAccount: data.BankAccount,
 		RiskScore:    riskScore,
 		RiskTier:     domain.RiskTierHigh,
 		TrustBattery: domain.TrustBattery{},
-		Approved:     riskScore < 60 && (validations == nil || len(validations.Errors) == 0),
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		Approved:    riskScore < 60 && (validations == nil || len(validations.Errors) == 0),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	if vendor.RiskScore < 30 {
@@ -156,9 +155,9 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 		ID:           job.JobID,
 		TenantID:     job.TenantID,
 		WorkflowType: domain.WorkflowVendorOnboarding,
-		Status:       domain.JobStatusCompleted,
-		UpdatedAt:    time.Now(),
-		Output:       result,
+		Status:      domain.JobStatusCompleted,
+		UpdatedAt:  time.Now(),
+		Output:      result,
 	}
 
 	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
@@ -171,9 +170,9 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 			ID:        fmt.Sprintf("hitl-%s", job.JobID),
 			TenantID:  job.TenantID,
 			JobID:     job.JobID,
-			Type:      "VENDOR_APPROVAL",
-			Message:   fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
-			Status:    "PENDING",
+			Type:     "VENDOR_APPROVAL",
+			Message:  fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
+			Status:   "PENDING",
 			CreatedAt: time.Now(),
 		}
 
@@ -186,14 +185,12 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 }
 
 // ValidateVendor validates vendor identifiers
-// TOOL: validate_vendor
 func (a *VendorAgent) ValidateVendor(ctx context.Context, gst, pan, ifsc string) (*domain.ValidationResult, error) {
 	result := a.validator.ValidateVendor(gst, pan, ifsc)
 	return result, nil
 }
 
 // CheckDuplicate checks for duplicate vendors
-// TOOL: check_duplicate
 func (a *VendorAgent) CheckDuplicate(ctx context.Context, tenantID, name string) (bool, error) {
 	vendors, err := a.db.ListVendors(ctx, tenantID)
 	if err != nil {
@@ -210,7 +207,6 @@ func (a *VendorAgent) CheckDuplicate(ctx context.Context, tenantID, name string)
 }
 
 // QueueVendor adds a vendor to the processing queue
-// TOOL: queue_vendor
 func (a *VendorAgent) QueueVendor(ctx context.Context, job *VendorJob) (string, error) {
 	return a.db.QueueEnqueue(ctx, "vendor-queue", job)
 }

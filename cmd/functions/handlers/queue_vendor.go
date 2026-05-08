@@ -39,7 +39,7 @@ func QueueVendorHandler(ctx context.Context, msg json.RawMessage) error {
 	}
 
 	// Get or create job
-	job, err := cosmosAdapter.GetJob(ctx, vendorJob.JobID)
+	job, err := cosmosAdapter.GetJob(ctx, vendorJob.JobID, vendorJob.TenantID)
 	if err != nil {
 		// Create new job if not exists
 		job = &domain.Job{

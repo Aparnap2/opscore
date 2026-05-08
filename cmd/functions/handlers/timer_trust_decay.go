@@ -14,8 +14,8 @@ var trustDecayRules = map[domain.TrustTier]struct {
 	DropTo         domain.TrustTier
 	NoActivityDays int
 }{
-	domain.TrustTierStrategic: {NoActivityDays: 180, DropTo: domain.TrustTierCore},
-	domain.TrustTierCore:      {NoActivityDays: 90, DropTo: domain.TrustTierStandard},
+	domain.TrustTierStrategic: {NoActivityDays: 180, DropTo: domain.TrustTierPreferred},
+	domain.TrustTierPreferred: {NoActivityDays: 90, DropTo: domain.TrustTierStandard},
 	domain.TrustTierStandard:  {NoActivityDays: 60, DropTo: domain.TrustTierProbation},
 	domain.TrustTierProbation: {NoActivityDays: 30, DropTo: domain.TrustTierProbation},
 }

@@ -7,10 +7,11 @@ import (
 type TrustTier string
 
 const (
-	TrustTierProbation TrustTier = "PROBATION"
-	TrustTierStandard  TrustTier = "STANDARD"
-	TrustTierCore      TrustTier = "CORE"
-	TrustTierStrategic TrustTier = "STRATEGIC"
+	TrustTierProbation  TrustTier = "PROBATION"
+	TrustTierStandard   TrustTier = "STANDARD"
+	TrustTierPreferred  TrustTier = "PREFERRED"
+	TrustTierStrategic  TrustTier = "STRATEGIC"
+	TrustTierBlocked    TrustTier = "BLOCKED"
 )
 
 type RiskTier string

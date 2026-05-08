@@ -11,7 +11,7 @@ import (
 
 // DocumentAgent handles document ingestion workflows
 type DocumentAgent struct {
-	storage  providers.StorageProvider
+	storage   providers.StorageProvider
 	queue    providers.QueueProvider
 	db       providers.DBProvider
 	ocr      providers.OCRProvider
@@ -74,10 +74,10 @@ func NewDocumentAgent(
 	validator *domain.IndiaValidator,
 ) *DocumentAgent {
 	return &DocumentAgent{
-		storage:  storage,
-		queue:   queue,
-		db:      db,
-		ocr:     ocr,
+		storage:   storage,
+		queue:    queue,
+		db:       db,
+		ocr:      ocr,
 		classifier: &DocumentClassifierWrapper{},
 		validator: validator,
 	}
@@ -85,16 +85,15 @@ func NewDocumentAgent(
 
 // DocumentJob represents a document processing job
 type DocumentJob struct {
-	TenantID   string `json:"tenant_id"`
-	JobID     string `json:"job_id"`
-	BlobURL   string `json:"blob_url"`
-	FileName  string `json:"file_name"`
-	Type     string `json:"type"`
-	JobType  string `json:"job_type"`
+	TenantID  string `json:"tenant_id"`
+	JobID    string `json:"job_id"`
+	BlobURL  string `json:"blob_url"`
+	FileName string `json:"file_name"`
+	Type    string `json:"type"`
+	JobType string `json:"job_type"`
 }
 
 // ProcessDocument handles the complete document ingestion workflow
-// TOOL: process_document
 func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (map[string]any, error) {
 	// Step 1: Classify document
 	docType, err := a.classifier.Classify(ctx, job.FileName, "pdf")
@@ -116,11 +115,11 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 
 	result := map[string]any{
 		"document_type": docType,
-		"text":         ocrResult.Text,
-		"confidence":   ocrResult.Confidence,
-		"key_values":   ocrResult.KeyValues,
+		"text":        ocrResult.Text,
+		"confidence":  ocrResult.Confidence,
+		"key_values":  ocrResult.KeyValues,
 		"validations":  validations,
-		"needs_hitl":   needsHITL,
+		"needs_hitl":  needsHITL,
 	}
 
 	// Update job in database
@@ -145,7 +144,7 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 	if needsHITL {
 		hitlReq := &domain.HITLRequest{
 			ID:        fmt.Sprintf("hitl-%s", job.JobID),
-			TenantID: job.TenantID,
+			TenantID:  job.TenantID,
 			JobID:    job.JobID,
 			Type:     "DOCUMENT_APPROVAL",
 			Message:  fmt.Sprintf("Document %s requires approval: confidence=%.2f, errors=%d", job.FileName, ocrResult.Confidence, len(validations.Errors)),
@@ -162,15 +161,13 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 }
 
 // QueueDocument adds a document to the processing queue
-// TOOL: queue_document
 func (a *DocumentAgent) QueueDocument(ctx context.Context, job *DocumentJob) (string, error) {
 	return a.queue.Enqueue(ctx, "document-queue", job)
 }
 
 // GetDocumentStatus retrieves the status of a document job
-// TOOL: get_document_status
-func (a *DocumentAgent) GetDocumentStatus(ctx context.Context, jobID string) (*domain.Job, error) {
-	return a.db.GetJob(ctx, jobID)
+func (a *DocumentAgent) GetDocumentStatus(ctx context.Context, jobID, tenantID string) (*domain.Job, error) {
+	return a.db.GetJob(ctx, jobID, tenantID)
 }
 
 // DocumentAgentTools returns the list of tools available to this agent

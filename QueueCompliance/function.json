@@ -4,7 +4,7 @@
       "name": "msg",
       "type": "queueTrigger",
       "direction": "in",
-      "queueName": "opscore-compliance",
+      "queueName": "compliance-queue",
       "connection": "AzureWebJobsStorage"
     }
   ]

@@ -12,17 +12,17 @@ func TestClassify(t *testing.T) {
 	}{
 		{
 			name:     "invoice with keywords",
-			text:     "TAX INVOICE GSTIN: 27AABCS1209D1Z5 CGST: 500 SGST: 500 Invoice Number: INV/2024/001 Bill To: ABC Corp",
+			text:     "INVOICE Tax Invoice Bill No: INV/2024/001 Proforma for services",
 			wantType: DocumentTypeInvoice,
 		},
 		{
-			name:     "invoice with e-invoice",
-			text:     "E-INVOICE Bill To: Test Company Ship To: Another Company CGST SGSTIGST",
+			name:     "invoice with gst invoice",
+			text:     "GST INVOICE Bill To: Test Company Proforma Invoice Number: INV/2024/001",
 			wantType: DocumentTypeInvoice,
 		},
 		{
 			name:     "purchase order",
-			text:     "PURCHASE ORDER PO Number: PO/2024/001 Delivery Date: 2024-12-31 Dispatched to: Warehouse Vendor Supply Acknowledgement Required",
+			text:     "PURCHASE ORDER Order No: PO/2024/001 Procurement Order for Q4 2024",
 			wantType: DocumentTypePurchaseOrder,
 		},
 		{

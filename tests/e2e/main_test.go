@@ -279,7 +279,7 @@ func TestDocumentIngestionE2E(t *testing.T) {
 		}
 
 		// Verify job was created
-		retrievedJob, err := db.GetJob(ctx, jobID)
+		retrievedJob, err := db.GetJob(ctx, jobID, TestTenantID)
 		if err != nil {
 			t.Fatalf("Failed to retrieve job: %v", err)
 		}
@@ -350,7 +350,7 @@ func TestDocumentIngestionE2E(t *testing.T) {
 		}
 
 		// Verify status is completed
-		retrievedJob, err := db.GetJob(ctx, jobID)
+		retrievedJob, err := db.GetJob(ctx, jobID, TestTenantID)
 		if err != nil {
 			t.Fatalf("Failed to retrieve job: %v", err)
 		}

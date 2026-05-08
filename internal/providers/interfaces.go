@@ -66,7 +66,7 @@ type QueueMessage struct {
 
 type DBProvider interface {
 	UpsertJob(ctx context.Context, job *domain.Job) error
-	GetJob(ctx context.Context, id string) (*domain.Job, error)
+	GetJob(ctx context.Context, id, tenantID string) (*domain.Job, error)
 	ListJobs(ctx context.Context, tenantID string, workflowType domain.WorkflowType, status domain.JobStatus) ([]*domain.Job, error)
 
 	UpsertVendor(ctx context.Context, vendor *domain.Vendor) error

@@ -131,25 +131,28 @@ func (c *CosmosAdapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 
 // GetJob retrieves a job by ID
 // Uses tenant_id for partition lookup
-func (c *CosmosAdapter) GetJob(ctx context.Context, id string) (*domain.Job, error) {
+func (c *CosmosAdapter) GetJob(ctx context.Context, id, tenantID string) (*domain.Job, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cosmos client not initialized")
 	}
 
-	// First, we need to find the job by ID to get its tenant_id
-	// This is a limitation when using tenant_id as partition key
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
+	}
+
 	container, err := c.getContainer("jobs")
 	if err != nil {
 		return nil, fmt.Errorf("getting container: %w", err)
 	}
 
-	// Query to find by job ID (Cosmos allows querying by id without partition key)
-	query := "SELECT * FROM c WHERE c.id = @id"
+	// Query to find by job ID using tenant partition key
+	query := "SELECT * FROM c WHERE c.id = @id AND c.tenant_id = @tenantID"
 	params := []azcosmos.QueryParameter{
 		{Name: "@id", Value: id},
+		{Name: "@tenantID", Value: tenantID},
 	}
 
-	pager := container.NewQueryItemsPager(query, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: params})
+	pager := container.NewQueryItemsPager(query, c.getPartitionKey(tenantID), &azcosmos.QueryOptions{QueryParameters: params})
 
 	var job *domain.Job
 	for pager.More() {
@@ -650,7 +653,7 @@ var _ providers.DBProvider = (*CosmosAdapter)(nil)
 // CosmosAdapterMock implements DBProvider for testing
 type CosmosAdapterMock struct {
 	UpsertJobFunc         func(ctx context.Context, job *domain.Job) error
-	GetJobFunc           func(ctx context.Context, id string) (*domain.Job, error)
+	GetJobFunc           func(ctx context.Context, id, tenantID string) (*domain.Job, error)
 	ListJobsFunc         func(ctx context.Context, tenantID string, workflowType domain.WorkflowType, status domain.JobStatus) ([]*domain.Job, error)
 	UpsertVendorFunc     func(ctx context.Context, vendor *domain.Vendor) error
 	GetVendorFunc        func(ctx context.Context, id string) (*domain.Vendor, error)
@@ -672,9 +675,9 @@ func (m *CosmosAdapterMock) UpsertJob(ctx context.Context, job *domain.Job) erro
 	return nil
 }
 
-func (m *CosmosAdapterMock) GetJob(ctx context.Context, id string) (*domain.Job, error) {
+func (m *CosmosAdapterMock) GetJob(ctx context.Context, id, tenantID string) (*domain.Job, error) {
 	if m.GetJobFunc != nil {
-		return m.GetJobFunc(ctx, id)
+		return m.GetJobFunc(ctx, id, tenantID)
 	}
 	return nil, nil
 }

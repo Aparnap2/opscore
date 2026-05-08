@@ -231,7 +231,7 @@ func TestFullWorkflow(t *testing.T) {
 	t.Logf("✓ Job updated to COMPLETED status")
 
 	// Try to retrieve job from Cosmos
-	retrievedJob, err := cosmosAdapter.GetJob(ctx, jobID)
+	retrievedJob, err := cosmosAdapter.GetJob(ctx, jobID, job.TenantID)
 	if err != nil {
 		t.Logf("⚠ Could not retrieve job from Cosmos: %v", err)
 	} else if retrievedJob != nil {
@@ -336,7 +336,7 @@ func TestCosmosDBConnection(t *testing.T) {
 	}
 
 	// Try to read it back
-	retrieved, err := adapter.GetJob(ctx, "test-job-001")
+	retrieved, err := adapter.GetJob(ctx, "test-job-001", "test-tenant")
 	if err != nil {
 		t.Logf("Warning: Could not read from Cosmos emulator: %v", err)
 	} else if retrieved != nil {

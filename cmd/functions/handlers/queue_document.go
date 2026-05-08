@@ -39,7 +39,7 @@ func QueueDocumentHandler(ctx context.Context, msg json.RawMessage) error {
 	}
 
 	// Update job status to running
-	job, err := cosmosAdapter.GetJob(ctx, docJob.JobID)
+	job, err := cosmosAdapter.GetJob(ctx, docJob.JobID, docJob.TenantID)
 	if err != nil {
 		log.Printf("Failed to get job: %v", err)
 		return fmt.Errorf("job not found: %w", err)

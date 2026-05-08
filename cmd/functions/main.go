@@ -22,9 +22,9 @@ type Config struct {
 	StorageAccountKey  string
 
 	// Azure Cosmos DB
-	CosmosEndpoint  string
-	CosmosKey       string
-	CosmosDatabase  string
+	CosmosEndpoint string
+	CosmosKey      string
+	CosmosDatabase string
 
 	// Azure Functions
 	QueueName string
@@ -99,7 +99,7 @@ func main() {
 
 	queueAdapter, _ = azure.NewQueueAdapter(azure.QueueConfig{
 		AccountName: config.StorageAccountName,
-		AccountKey: config.StorageAccountKey,
+		AccountKey:  config.StorageAccountKey,
 	})
 
 	cosmosAdapter, _ = azure.NewCosmosAdapter(azure.CosmosConfig{
@@ -169,6 +169,7 @@ func main() {
 		handlers.HTTPUploadHandler,
 		handlers.HTTPJobStatusHandler,
 		handlers.HTTPSlackWebhookHandler,
+		handlers.HTTPVendorHandler,
 		handlers.QueueDocumentHandler,
 		handlers.QueueVendorHandler,
 		handlers.QueueComplianceHandler,
@@ -325,6 +326,63 @@ func serveHTTP(ctx context.Context) {
 		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyComplianceAgent, getCtxValue(baseCtx, "complianceAgent"))
 		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyHITLProvider, getCtxValue(baseCtx, "hitlProvider"))
 		handlers.HTTPSlackWebhookHandler(handlerCtx, w, r)
+	})
+
+	// Vendor HTTP endpoints
+	mux.HandleFunc("/HttpVendor", func(w http.ResponseWriter, r *http.Request) {
+		handlerCtx := context.WithValue(baseCtx, handlers.CtxKeyBlobAdapter, getCtxValue(baseCtx, "blobAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyQueueAdapter, getCtxValue(baseCtx, "queueAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyCosmosAdapter, getCtxValue(baseCtx, "cosmosAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyDocAgent, getCtxValue(baseCtx, "docAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyVendorAgent, getCtxValue(baseCtx, "vendorAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyComplianceAgent, getCtxValue(baseCtx, "complianceAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyHITLProvider, getCtxValue(baseCtx, "hitlProvider"))
+		handlers.HTTPVendorHandler(handlerCtx, w, r)
+	})
+
+	mux.HandleFunc("/vendors", func(w http.ResponseWriter, r *http.Request) {
+		handlerCtx := context.WithValue(baseCtx, handlers.CtxKeyBlobAdapter, getCtxValue(baseCtx, "blobAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyQueueAdapter, getCtxValue(baseCtx, "queueAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyCosmosAdapter, getCtxValue(baseCtx, "cosmosAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyDocAgent, getCtxValue(baseCtx, "docAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyVendorAgent, getCtxValue(baseCtx, "vendorAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyComplianceAgent, getCtxValue(baseCtx, "complianceAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyHITLProvider, getCtxValue(baseCtx, "hitlProvider"))
+		handlers.HTTPVendorHandler(handlerCtx, w, r)
+	})
+
+	mux.HandleFunc("/api/vendors", func(w http.ResponseWriter, r *http.Request) {
+		handlerCtx := context.WithValue(baseCtx, handlers.CtxKeyBlobAdapter, getCtxValue(baseCtx, "blobAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyQueueAdapter, getCtxValue(baseCtx, "queueAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyCosmosAdapter, getCtxValue(baseCtx, "cosmosAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyDocAgent, getCtxValue(baseCtx, "docAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyVendorAgent, getCtxValue(baseCtx, "vendorAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyComplianceAgent, getCtxValue(baseCtx, "complianceAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyHITLProvider, getCtxValue(baseCtx, "hitlProvider"))
+		handlers.HTTPVendorHandler(handlerCtx, w, r)
+	})
+
+	// Vendor ID lookup routes
+	mux.HandleFunc("/vendors/", func(w http.ResponseWriter, r *http.Request) {
+		handlerCtx := context.WithValue(baseCtx, handlers.CtxKeyBlobAdapter, getCtxValue(baseCtx, "blobAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyQueueAdapter, getCtxValue(baseCtx, "queueAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyCosmosAdapter, getCtxValue(baseCtx, "cosmosAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyDocAgent, getCtxValue(baseCtx, "docAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyVendorAgent, getCtxValue(baseCtx, "vendorAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyComplianceAgent, getCtxValue(baseCtx, "complianceAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyHITLProvider, getCtxValue(baseCtx, "hitlProvider"))
+		handlers.HTTPVendorHandler(handlerCtx, w, r)
+	})
+
+	mux.HandleFunc("/api/vendors/", func(w http.ResponseWriter, r *http.Request) {
+		handlerCtx := context.WithValue(baseCtx, handlers.CtxKeyBlobAdapter, getCtxValue(baseCtx, "blobAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyQueueAdapter, getCtxValue(baseCtx, "queueAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyCosmosAdapter, getCtxValue(baseCtx, "cosmosAdapter"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyDocAgent, getCtxValue(baseCtx, "docAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyVendorAgent, getCtxValue(baseCtx, "vendorAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyComplianceAgent, getCtxValue(baseCtx, "complianceAgent"))
+		handlerCtx = context.WithValue(handlerCtx, handlers.CtxKeyHITLProvider, getCtxValue(baseCtx, "hitlProvider"))
+		handlers.HTTPVendorHandler(handlerCtx, w, r)
 	})
 
 	// Queue triggers - use envelope pattern (placeholder)

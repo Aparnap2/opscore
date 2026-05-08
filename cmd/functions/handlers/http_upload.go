@@ -170,7 +170,7 @@ func HTTPUploadHandler(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	log.Printf("Upload successful: job=%s, blob=%s", jobID, blobPath)
 	writeJSON(w, http.StatusAccepted, UploadResponse{
 		JobID:   jobID,
-		Status:  "PENDING",
+		Status:  "queued",
 		BlobURL: blobURL,
 		Message: "Document uploaded successfully and queued for processing",
 	})
@@ -248,6 +248,6 @@ func UploadWithFormHandler(ctx context.Context, w http.ResponseWriter, r *http.R
 
 	writeJSON(w, http.StatusAccepted, UploadResponse{
 		JobID:  jobID,
-		Status: "PENDING",
+		Status: "queued",
 	})
 }

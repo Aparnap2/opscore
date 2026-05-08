@@ -39,7 +39,7 @@ func QueueComplianceHandler(ctx context.Context, msg json.RawMessage) error {
 	}
 
 	// Update job status
-	job, err := cosmosAdapter.GetJob(ctx, complianceJob.JobID)
+	job, err := cosmosAdapter.GetJob(ctx, complianceJob.JobID, complianceJob.TenantID)
 	if err != nil {
 		// Create new job
 		job = &domain.Job{

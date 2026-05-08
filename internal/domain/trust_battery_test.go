@@ -140,7 +140,7 @@ func TestTrustBattery_RecordError(t *testing.T) {
 	}
 }
 
-func TestTrustBattery_FlagFraud(t *testing.T) {
+func TestTrustBattery_FraudFlagged(t *testing.T) {
 	tests := []struct {
 		name    string
 		initialTB *TrustBattery
@@ -155,7 +155,7 @@ func TestTrustBattery_FlagFraud(t *testing.T) {
 				ConsecutiveSuccesses: 10,
 				ConsecutiveErrors:  0,
 			},
-			wantTier:  TrustTierProbation,
+			wantTier:  TrustTierBlocked,
 			wantScore: 0,
 		},
 		{
@@ -166,7 +166,7 @@ func TestTrustBattery_FlagFraud(t *testing.T) {
 				ConsecutiveSuccesses: 50,
 				ConsecutiveErrors:  0,
 			},
-			wantTier:  TrustTierProbation,
+			wantTier:  TrustTierBlocked,
 			wantScore: 0,
 		},
 	}
@@ -174,15 +174,15 @@ func TestTrustBattery_FlagFraud(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tb := tt.initialTB
-			tb.FlagFraud()
+			tb.FraudFlagged()
 			if tb.Tier != tt.wantTier {
-				t.Errorf("FlagFraud().Tier = %v, want %v", tb.Tier, tt.wantTier)
+				t.Errorf("FraudFlagged().Tier = %v, want %v", tb.Tier, tt.wantTier)
 			}
 			if tb.TrustScore != tt.wantScore {
-				t.Errorf("FlagFraud().TrustScore = %v, want %v", tb.TrustScore, tt.wantScore)
+				t.Errorf("FraudFlagged().TrustScore = %v, want %v", tb.TrustScore, tt.wantScore)
 			}
 			if tb.ConsecutiveSuccesses != 0 {
-				t.Errorf("FlagFraud().ConsecutiveSuccesses = %v, want 0", tb.ConsecutiveSuccesses)
+				t.Errorf("FraudFlagged().ConsecutiveSuccesses = %v, want 0", tb.ConsecutiveSuccesses)
 			}
 		})
 	}

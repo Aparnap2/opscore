@@ -116,7 +116,7 @@ func HTTPSlackWebhookHandler(ctx context.Context, w http.ResponseWriter, r *http
 		if actionCallback.CallbackID != "" {
 			log.Printf("Processing action: callback_id=%s", actionCallback.CallbackID)
 			// Route to HITL resume
-			handleSlackAction(ctx, actionCallback)
+			handleSlackAction(ctx, r, actionCallback)
 		}
 
 		// Handle message events
@@ -149,7 +149,7 @@ func verifySlackSignature(signingSecret, timestamp, body, signature string) bool
 }
 
 // handleSlackAction processes Slack interactive actions (button clicks, etc.)
-func handleSlackAction(ctx context.Context, actionCallback SlackActionCallback) error {
+func handleSlackAction(ctx context.Context, r *http.Request, actionCallback SlackActionCallback) error {
 	log.Printf("Processing Slack action: %s", actionCallback.CallbackID)
 
 	// Get cosmos adapter
@@ -170,12 +170,18 @@ func handleSlackAction(ctx context.Context, actionCallback SlackActionCallback) 
 	action := parts[0]
 	jobID := parts[1]
 
-	// Get job
-	job, err := cosmosAdapter.GetJob(ctx, jobID)
+	// Get job - we need tenantID first, so fetch with tenant from header
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	job, err := cosmosAdapter.GetJob(ctx, jobID, tenantID)
 	if err != nil {
 		log.Printf("Failed to get job %s: %v", jobID, err)
 		return err
 	}
+
+	_ = action // Acknowledge action variable
 
 	// Find associated HITL request
 	hitlRequests, err := cosmosAdapter.ListPendingHITL(ctx, job.TenantID)

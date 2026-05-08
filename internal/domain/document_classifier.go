@@ -22,52 +22,37 @@ type ClassificationResult struct {
 	Confidence float64        `json:"confidence"`
 }
 
-// Keyword sets for document classification
+// Keyword sets for document classification (PRD v3.0 spec)
 var (
 	invoiceKeywords = []string{
+		"invoice",
+		"bill",
 		"tax invoice",
-		"gstin",
-		"cgst",
-		"sgst",
-		"igst",
-		"invoice number",
-		"bill to",
-		"ship to",
-		"e-invoice",
-		"eway bill",
+		"gst invoice",
+		"proforma",
 	}
 
 	contractKeywords = []string{
 		"agreement",
 		"contract",
+		"mou",
+		"memorandum",
 		"terms and conditions",
-		"whereas",
-		"in witness wherefore",
-		"hereby agree",
-		"executed this",
 	}
 
 	gstNoticeKeywords = []string{
 		"notice",
-		"drc-01",
-		"drc-02",
-		"drc-07",
-		"arn",
+		"gst department",
 		"demand",
-		"gst notice",
-		"cancellation",
-		"assessment",
-		"rectification",
+		"scrutiny",
+		"show cause",
 	}
 
 	purchaseOrderKeywords = []string{
 		"purchase order",
-		"po number",
-		"delivery date",
-		"dispatched to",
-		"vendor supply",
-		"acknowledgement",
-		"buyer",
+		"p.o.",
+		"order no",
+		"procurement order",
 	}
 )
 

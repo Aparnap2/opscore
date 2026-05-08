@@ -52,18 +52,18 @@ func HTTPJobStatusHandler(ctx context.Context, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Fetch job from Cosmos DB
-	job, err := cosmosAdapter.GetJob(ctx, jobID)
-	if err != nil {
-		log.Printf("Failed to get job %s: %v", jobID, err)
-		writeError(w, http.StatusNotFound, "Job not found")
-		return
-	}
-
 	// Extract tenant ID from header for authorization
 	tenantID := r.Header.Get("X-Tenant-ID")
 	if tenantID == "" {
 		tenantID = "default"
+	}
+
+	// Fetch job from Cosmos DB using tenant ID for partition key
+	job, err := cosmosAdapter.GetJob(ctx, jobID, tenantID)
+	if err != nil {
+		log.Printf("Failed to get job %s: %v", jobID, err)
+		writeError(w, http.StatusNotFound, "Job not found")
+		return
 	}
 
 	// Verify tenant access (in production, use proper RBAC)
@@ -169,6 +169,12 @@ func HTTPJobApprovalHandler(ctx context.Context, w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Extract tenant ID from header for authorization
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
 	// Get cosmos adapter
 	cosmosAdapter, err := getCosmosAdapter(ctx)
 	if err != nil {
@@ -176,8 +182,8 @@ func HTTPJobApprovalHandler(ctx context.Context, w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Fetch job
-	job, err := cosmosAdapter.GetJob(ctx, jobID)
+	// Fetch job using tenant ID from header
+	job, err := cosmosAdapter.GetJob(ctx, jobID, tenantID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Job not found")
 		return
@@ -190,10 +196,6 @@ func HTTPJobApprovalHandler(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 
 	// Verify tenant access
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
 	if job.TenantID != tenantID {
 		writeError(w, http.StatusForbidden, "Access denied")
 		return
