@@ -44,9 +44,24 @@ func HTTPSlackWebhookHandler(ctx context.Context, w http.ResponseWriter, r *http
 
 	// Get config for signing secret
 	configVal := ctx.Value(CtxKeyConfig)
-	if configVal == nil {
-		log.Println("Warning: Config not available, skipping signature verification")
-	} else {
+
+	// Determine if we can verify signatures
+	// Only verify if configVal is a valid map with signing secret
+	var signingSecret string
+	canVerify := false
+	if configVal != nil {
+		if cfgMap, ok := configVal.(map[string]string); ok {
+			signingSecret = cfgMap["SLACK_SIGNING_SECRET"]
+			canVerify = signingSecret != ""
+		} else if cfg, ok := configVal.(interface{ GetSlackSigningSecret() string }); ok {
+			signingSecret = cfg.GetSlackSigningSecret()
+			canVerify = signingSecret != ""
+		}
+	}
+
+	// Skip signature verification if config not available
+	// This allows url_verification to work without config
+	if canVerify {
 		// Verify Slack signature
 		signature := r.Header.Get("X-Slack-Signature")
 		timestamp := r.Header.Get("X-Slack-Request-Timestamp")
@@ -60,15 +75,13 @@ func HTTPSlackWebhookHandler(ctx context.Context, w http.ResponseWriter, r *http
 		// In production, parse timestamp and check age
 		_ = timestamp // Skip for now in local dev
 
-		// Compute signature
-		config := configVal.(map[string]string)
-		signingSecret := config["SLACK_SIGNING_SECRET"]
-		if signingSecret != "" {
-			if !verifySlackSignature(signingSecret, timestamp, body, signature) {
-				writeError(w, http.StatusUnauthorized, "Invalid signature")
-				return
-			}
+		// Verify signature
+		if !verifySlackSignature(signingSecret, timestamp, body, signature) {
+			writeError(w, http.StatusUnauthorized, "Invalid signature")
+			return
 		}
+	} else {
+		log.Println("Warning: Config not available or missing signing secret, skipping signature verification")
 	}
 
 	// Parse Slack payload

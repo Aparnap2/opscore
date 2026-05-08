@@ -394,13 +394,12 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'APPINSIGHTS_INSTRUMENTATIONKEY'
           value: appInsights.properties.InstrumentationKey
         }
+        // NOTE: For custom handlers, DO NOT set FUNCTIONS_WORKER_RUNTIME
+        // Setting it causes the host to try to load a language worker instead of 
+        // starting the custom handler executable
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'
           value: '~4'
-        }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'go'
         }
         {
           name: 'COSMOS_DB_ENDPOINT'
