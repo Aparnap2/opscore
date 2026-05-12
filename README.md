@@ -1,155 +1,101 @@
-# OpsCore v2.0 - Agentic Internal Operations Platform
+# OpsCore — Autonomous Back-Office for Indian B2B
 
-A production-grade internal operations platform for mid-size B2B companies in India. Built with Go and Azure serverless, it automates document ingestion, compliance monitoring, and vendor onboarding with AI agents.
+OpsCore is an autonomous back-office system for Indian B2B businesses. It ingests vendor documents (PDF invoices, onboarding forms, compliance notices) via API, validates Indian tax identifiers (GST, PAN, IFSC) using compiled Go regex, scores vendor risk using a deterministic formula, tracks vendor trust state through a five-state machine, and delivers a single structured Slack approval request. The owner clicks one button.
 
-## Features
+**Live demo:** https://opscore-functions-linux.azurewebsites.net/api/health
 
-### Workflow 1: Document Ingestion
-- PDF/Image upload via API
-- Automatic document classification (Invoice, Contract, GST Notice, Purchase Order)
-- Structured field extraction using Sarvam AI OCR + LLM
-- Confidence scoring per field
-- HITL (Human-In-The-Loop) review via Slack for low-confidence or high-value items
+---
 
-### Workflow 2: Compliance Monitoring
-- Scheduled regulatory scraper (SEBI, RBI, GST)
-- Semantic chunking and vector storage (Cosmos DB)
-- Gap analysis with hybrid search
-- Department owner assignment
-- Slack notifications
+## How It Works
 
-### Workflow 3: Vendor Onboarding
-- Vendor request form via API or Slack
-- Document verification (GST, PAN, Bank details)
-- Deterministic risk scoring
-- Tiered approval workflow (Slack)
-- Trust Battery state machine
+```
+You upload a PDF invoice
+  → Go validates GST/PAN/IFSC with regex (no LLM)
+  → Deterministic risk score computed
+  → If amount > ₹1L or low confidence → Slack approval request
+  → Owner clicks [Approve] → done
+```
 
-## Tech Stack
+**Three workflows:**
+1. **Document Ingestion** — PDF → OCR → validation → Slack approval
+2. **Vendor Onboarding** — form → risk scoring → Trust Battery → approval
+3. **Compliance Monitoring** — RSS scraper → gap analysis → Slack alert
 
-| Component | Technology |
-|-----------|------------|
-| Functions | Go + Azure Functions Custom Handler |
-| Database | Azure Cosmos DB (SQL API) |
-| Storage | Azure Blob Storage |
-| Queue | Azure Queue Storage |
-| OCR/LLM | Sarvam AI |
-| HITL UI | Slack Block Kit |
-| Observability | Azure App Insights |
-| IaC | Bicep |
+---
 
 ## Architecture
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Slack     │────│  Azure      │────│   Cosmos DB │
-│  (HITL UI)  │     │  Functions  │     │  (SQL API)  │
-└─────────────┘     └──────┬──────┘     └─────────────┘
-                           │
-                    ┌────▼────┐
-                    │  Queue  │
-                    │ Storage │
-                    └────┬────┘
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-    ┌──────────┐  ┌──────────┐  ┌──────────┐
-    │ Document │  │Compliance│  │ Vendor  │
-    │ Ingestion│  │ Monitoring│  │Onboarding│
-    └──────────┘  └──────────┘  └──────────┘
-```
+![OpsCore Workflow](opscore_workflow.png)
 
-## Azure Deployment
+| Layer | Technology |
+|-------|------------|
+| Language | Go 1.22+ |
+| Deployment | Azure Functions (Consumption Y1, zero idle cost) |
+| Database | Azure Cosmos DB NoSQL (free tier) |
+| Storage | Azure Blob Storage (Standard LRS) |
+| Queue | Azure Queue Storage (always-free) |
+| OCR | Sarvam Document Intelligence |
+| LLM | Sarvam-M (used only when OCR confidence < 0.85) |
+| HITL | Slack Block Kit |
+| Observability | Azure Application Insights |
 
-### Prerequisites
-- Azure subscription
-- Azure CLI installed
-- Go 1.21+
+**₹0/month** at demo scale. All services within always-free tiers.
 
-### Infrastructure Setup
+---
+
+## Quick Start
+
 ```bash
-cd infra
-az group create --location centralindia --name opscore-prod
-az deployment group create --resource-group opscore-prod --template-file main.bicep
+# 1. Clone
+git clone https://github.com/Aparnap2/opscore.git
+cd opscore
+
+# 2. Configure
+cp .env.example local.settings.json
+# Fill in: AzureWebJobsStorage, COSMOS_ENDPOINT, COSMOS_KEY, SARVAM_API_KEY
+
+# 3. Start emulators (for local dev)
+docker compose -f docker-compose.test.yml up -d
+
+# 4. Build & run
+go build -o handler ./cmd/functions
+go run ./cmd/migrate   # create Cosmos containers
+func start
+
+# 5. Test
+curl http://localhost:7071/api/health
 ```
 
-### Deploy Functions
-```bash
-# Build Linux binary
-GOOS=linux GOARCH=amd64 go build -o handler ./cmd/functions
-
-# Deploy (creates or updates function app)
-func azure functionapp publish opscore-functions-linux --resource-group opscore-prod
-```
-
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `AzureWebJobsStorage` | Azure Storage connection string | Yes |
-| `COSMOS_ENDPOINT` | Cosmos DB endpoint URL | Yes |
-| `COSMOS_KEY` | Cosmos DB master key | Yes |
-| `COSMOS_DATABASE` | Database name (default: opscore) | No |
-| `SLACK_SIGNING_SECRET` | Slack signing secret | No |
-| `SLACK_BOT_TOKEN` | Slack bot token for HITL | No |
-| `APPINSIGHTS_INSTRUMENTATIONKEY` | App Insights key | No |
+---
 
 ## API Endpoints
 
-All endpoints (except /health) require `x-functions-key` header.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/health` | Health check (no auth) |
+| `POST /api/upload` | Upload PDF (multipart/form-data) |
+| `GET /api/jobs/{id}` | Get job status |
+| `POST /api/vendors` | Create vendor request |
+| `GET /api/vendors/{id}` | Get vendor status |
+| `POST /api/slack/webhook` | Slack callbacks |
 
-### Health
-- `GET /api/health` - Basic health check (anonymous)
+All endpoints except `/health` require `x-functions-key` header.
 
-### Documents
-- `POST /api/upload` - Upload PDF/Image
-- `GET /api/jobs/{id}` - Job status
+---
 
-### Vendors
-- `POST /api/vendors` - Create vendor request
-- `GET /api/vendors/{id}` - Vendor status
+## Deterministic Logic (No LLM)
 
-### Slack
-- `POST /api/slack/webhook` - Slack events & interactive callbacks
+| Decision | Implementation |
+|----------|----------------|
+| Document classification | `internal/domain/document_classifier.go` (keyword rules) |
+| GST/PAN/IFSC validation | `internal/domain/india_validator.go` (regex) |
+| Vendor risk scoring | `internal/domain/risk_scorer.go` (base 50 + adjustments) |
+| Trust tier transitions | `internal/domain/trust_battery.go` (state machine) |
 
-## Project Structure
+LLM is called only for: OCR confidence < 0.85 AND ambiguous fields.
 
-```
-opscore/
-├── cmd/functions/           # Azure Functions entrypoint
-│   ├── main.go             # Custom handler server
-│   └── handlers/           # HTTP, Queue, Timer handlers
-├── internal/
-│   ├── domain/             # Business entities & validation
-│   ├── adapters/           # Azure, Sarvam, Slack integrations
-│   ├── agents/             # Document, Vendor, Compliance agents
-│   └── providers/          # Interface abstractions
-├── tests/                   # Unit & E2E tests
-├── infra/                   # Bicep infrastructure
-├── HttpHealth/             # Function definition
-├── HttpUpload/             # Function definition
-├── HttpJobStatus/         # Function definition
-├── HttpSlackWebhook/      # Function definition
-├── QueueDocument/         # Function definition
-├── QueueVendor/           # Function definition
-├── QueueCompliance/       # Function definition
-├── TimerScraper/          # Function definition
-└── TimerTrustDecay/       # Function definition
-```
-
-## Testing
-
-```bash
-# Run unit tests
-go test ./...
-
-# Run E2E tests (requires Azure credentials)
-go test -tags=e2e ./tests/...
-
-# Local function emulation
-func start
-```
+---
 
 ## License
 
-MIT License
+MIT
