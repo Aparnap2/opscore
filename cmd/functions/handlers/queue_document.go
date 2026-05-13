@@ -45,7 +45,7 @@ func QueueDocumentHandler(ctx context.Context, msg json.RawMessage) error {
 		return fmt.Errorf("job not found: %w", err)
 	}
 
-	job.Status = domain.JobStatusRunning
+	job.Status = domain.JobStatusProcessing
 	job.UpdatedAt = time.Now()
 	if err := cosmosAdapter.UpsertJob(ctx, job); err != nil {
 		log.Printf("Failed to update job status: %v", err)

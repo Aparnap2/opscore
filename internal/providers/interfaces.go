@@ -75,6 +75,7 @@ type DBProvider interface {
 
 	UpsertDocument(ctx context.Context, doc *domain.Document) error
 	GetDocument(ctx context.Context, id string) (*domain.Document, error)
+	FindBySHA256(ctx context.Context, tenantID, contentHash string) (*domain.Document, error)
 
 	UpsertHITLRequest(ctx context.Context, req *domain.HITLRequest) error
 	GetHITLRequest(ctx context.Context, id string) (*domain.HITLRequest, error)

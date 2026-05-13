@@ -12,6 +12,7 @@ import (
 	"github.com/aparna/opscore/internal/adapters/azure"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
+	"github.com/aparna/opscore/internal/middleware/ratelimit"
 	"github.com/aparna/opscore/internal/providers"
 )
 
@@ -412,6 +413,13 @@ func serveHTTP(ctx context.Context) {
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("OpsCore Functions listening on %s", addr)
 
+	// Initialize rate limiter from environment
+	rl := ratelimit.NewFromEnv()
+	log.Printf("Rate limiter: RPS=%v, Burst=%v", getEnv("RATE_LIMIT_RPS", "10"), getEnv("RATE_LIMIT_BURST", "20"))
+
+	// Wrap mux with rate limiting middleware
+	handler := rl.Middleware(mux)
+
 	// Catch-all for debugging
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Caught request: %s %s", r.Method, r.URL.Path)
@@ -420,7 +428,7 @@ func serveHTTP(ctx context.Context) {
 		w.Write([]byte("OpsCore handler running. Path: " + r.URL.Path))
 	})
 
-	if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
+	if err := http.ListenAndServe(addr, handler); err != nil && err != http.ErrServerClosed {
 		log.Printf("HTTP server error: %v", err)
 	}
 }

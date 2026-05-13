@@ -63,12 +63,29 @@ func HTTPUploadHandler(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Read file content
+	// Compute SHA256 hash using streaming to avoid loading entire file into memory
+	// Reset the file reader after computing hash
+	contentHash, err := domain.ComputeSHA256Streaming(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to compute file hash")
+		return
+	}
+
+	// Seek back to beginning of file for re-reading
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read file")
+		return
+	}
+
+	// Read file content for upload
 	fileContent, err := io.ReadAll(file)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to read file")
 		return
 	}
+
+	// Generate idempotency key
+	idempotencyKey := domain.GenerateIdempotencyKey(contentHash, tenantID)
 
 	// Get adapters
 	blobAdapter, err := getBlobAdapter(ctx)
@@ -86,6 +103,22 @@ func HTTPUploadHandler(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	cosmosAdapter, err := getCosmosAdapter(ctx)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Database service unavailable")
+		return
+	}
+
+	// Check for duplicate document by content hash
+	existingDoc, err := cosmosAdapter.FindBySHA256(ctx, tenantID, contentHash)
+	if err != nil {
+		log.Printf("Duplicate check failed: %v", err)
+		// Continue with upload if duplicate check fails - don't block on errors
+	}
+	if existingDoc != nil {
+		log.Printf("Duplicate detected: hash=%s, existing_doc_id=%s", contentHash, existingDoc.ID)
+		writeJSON(w, http.StatusConflict, UploadResponse{
+			JobID:   existingDoc.JobID,
+			Status:  "duplicate",
+			Message: "Document with identical content already exists",
+		})
 		return
 	}
 
@@ -124,13 +157,35 @@ func HTTPUploadHandler(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		UpdatedAt:      now,
 		TraceID:        r.Header.Get("X-Trace-ID"),
 		CorrelationID:  r.Header.Get("X-Correlation-ID"),
-		Input:          map[string]string{"filename": header.Filename, "blob_url": blobURL},
+		Input: map[string]string{
+			"filename":        header.Filename,
+			"blob_url":       blobURL,
+			"content_hash":   contentHash,
+			"idempotency_key": idempotencyKey,
+		},
 	}
 
 	if err := cosmosAdapter.UpsertJob(ctx, job); err != nil {
 		log.Printf("Failed to create job: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create job")
 		return
+	}
+
+	// Create document record for future duplicate detection
+	doc := &domain.Document{
+		ID:          uuid.New().String(),
+		TenantID:    tenantID,
+		JobID:       jobID,
+		FileName:    header.Filename,
+		StoragePath: blobURL,
+		Type:        "DOCUMENT",
+		Status:      "pending",
+		ContentHash: contentHash,
+		CreatedAt:   now,
+	}
+	if err := cosmosAdapter.UpsertDocument(ctx, doc); err != nil {
+		log.Printf("Failed to create document record: %v", err)
+		// Continue - job is created, document tracking is optional
 	}
 
 	// Enqueue document processing job

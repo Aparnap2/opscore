@@ -46,14 +46,14 @@ func QueueVendorHandler(ctx context.Context, msg json.RawMessage) error {
 			ID:           vendorJob.JobID,
 			TenantID:     vendorJob.TenantID,
 			WorkflowType: domain.WorkflowVendorOnboarding,
-			Status:       domain.JobStatusRunning,
+			Status:       domain.JobStatusProcessing,
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		}
 	}
 
 	// Update job status
-	job.Status = domain.JobStatusRunning
+	job.Status = domain.JobStatusProcessing
 	job.UpdatedAt = time.Now()
 	if err := cosmosAdapter.UpsertJob(ctx, job); err != nil {
 		log.Printf("Failed to update job: %v", err)

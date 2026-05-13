@@ -78,7 +78,7 @@ func TimerScraperHandler(ctx context.Context) error {
 		ID:           scrapeID,
 		TenantID:     tenantID,
 		WorkflowType: domain.WorkflowCompliance,
-		Status:       domain.JobStatusRunning,
+		Status:       domain.JobStatusProcessing,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Input:        map[string]string{"sources": "SEBI,RBI,GST"},

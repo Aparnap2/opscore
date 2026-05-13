@@ -33,12 +33,37 @@ const (
 type JobStatus string
 
 const (
-	JobStatusPending      JobStatus = "PENDING"
-	JobStatusRunning      JobStatus = "RUNNING"
-	JobStatusCompleted    JobStatus = "COMPLETED"
-	JobStatusFailed       JobStatus = "FAILED"
-	JobStatusAwaitingHITL JobStatus = "AWAITING_HITL"
+	JobStatusPending         JobStatus = "PENDING"
+	JobStatusQueued          JobStatus = "QUEUED"
+	JobStatusProcessing      JobStatus = "PROCESSING"
+	JobStatusCompleted       JobStatus = "COMPLETED"
+	JobStatusFailed          JobStatus = "FAILED"            // legacy - treat as terminal
+	JobStatusRetryableFailed JobStatus = "RETRYABLE_FAILED" // can retry
+	JobStatusTerminalFailed  JobStatus = "TERMINAL_FAILED"  // won't retry
+	JobStatusDeadLettered    JobStatus = "DEAD_LETTERED"    // exceeded max retries
+	JobStatusAwaitingHITL    JobStatus = "AWAITING_HITL"
 )
+
+// IsRetryable returns true if the job status allows retry
+func (s JobStatus) IsRetryable() bool {
+	return s == JobStatusRetryableFailed
+}
+
+// IsTerminal returns true if the job status is final and won't change
+func (s JobStatus) IsTerminal() bool {
+	return s == JobStatusCompleted ||
+		s == JobStatusFailed ||
+		s == JobStatusTerminalFailed ||
+		s == JobStatusDeadLettered
+}
+
+// IsFailed returns true if the job status indicates failure
+func (s JobStatus) IsFailed() bool {
+	return s == JobStatusFailed ||
+		s == JobStatusRetryableFailed ||
+		s == JobStatusTerminalFailed ||
+		s == JobStatusDeadLettered
+}
 
 type AuditEvent struct {
 	TenantID      string    `json:"tenant_id"`
@@ -65,6 +90,19 @@ type Job struct {
 	Input         interface{}  `json:"input,omitempty"`
 	Output        interface{}  `json:"output,omitempty"`
 	Error         string       `json:"error,omitempty"`
+	// Batch job fields for bundle splitting
+	ParentBatchID string `json:"parent_batch_id,omitempty"` // for child jobs
+	IsChildJob    bool   `json:"is_child_job,omitempty"`
+}
+
+// ComplianceChunk represents a chunk of a document for compliance processing
+type ComplianceChunk struct {
+	ID           string `json:"id"`
+	TenantID     string `json:"tenant_id"`
+	Content      string `json:"content"`
+	ChunkIndex   int    `json:"chunk_index"`
+	DocumentType string `json:"document_type,omitempty"`
+	PageNumber   int    `json:"page_number,omitempty"`
 }
 
 type Vendor struct {
@@ -93,6 +131,7 @@ type Document struct {
 	FileName    string      `json:"file_name"`
 	StoragePath string      `json:"storage_path"`
 	Status      string      `json:"status"`
+	ContentHash string      `json:"content_hash,omitempty"`
 }
 
 type HITLRequest struct {

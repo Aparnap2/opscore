@@ -41,7 +41,7 @@ func TimerTrustDecayHandler(ctx context.Context) error {
 		ID:           jobID,
 		TenantID:     tenantID,
 		WorkflowType: domain.WorkflowCompliance, // Using compliance workflow for system jobs
-		Status:       domain.JobStatusRunning,
+		Status:       domain.JobStatusProcessing,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Input:        map[string]string{"task": "trust_decay"},

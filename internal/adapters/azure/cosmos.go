@@ -386,6 +386,58 @@ func (c *CosmosAdapter) UpsertDocument(ctx context.Context, doc *domain.Document
 	return nil
 }
 
+// FindBySHA256 finds a document by tenant and content hash for duplicate detection
+// Uses tenant_id partition key for efficient querying
+func (c *CosmosAdapter) FindBySHA256(ctx context.Context, tenantID, contentHash string) (*domain.Document, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("cosmos client not initialized")
+	}
+
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
+	}
+
+	if contentHash == "" {
+		return nil, fmt.Errorf("contentHash is required")
+	}
+
+	container, err := c.getContainer("documents")
+	if err != nil {
+		return nil, fmt.Errorf("getting container: %w", err)
+	}
+
+	// Query documents container by partition key (tenant_id) and filter by content hash
+	query := "SELECT * FROM c WHERE c.tenant_id = @tenantID AND c.content_hash = @contentHash"
+	params := []azcosmos.QueryParameter{
+		{Name: "@tenantID", Value: tenantID},
+		{Name: "@contentHash", Value: contentHash},
+	}
+
+	pager := container.NewQueryItemsPager(query, c.getPartitionKey(tenantID), &azcosmos.QueryOptions{QueryParameters: params})
+
+	var doc *domain.Document
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("querying document by hash: %w", err)
+		}
+
+		for _, item := range resp.Items {
+			var d domain.Document
+			if err := json.Unmarshal(item, &d); err != nil {
+				continue
+			}
+			doc = &d
+			break
+		}
+		if doc != nil {
+			break
+		}
+	}
+
+	return doc, nil
+}
+
 // GetDocument retrieves a document by ID
 // Queries by ID since partition key is tenant_id
 func (c *CosmosAdapter) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
@@ -660,6 +712,7 @@ type CosmosAdapterMock struct {
 	ListVendorsFunc      func(ctx context.Context, tenantID string) ([]*domain.Vendor, error)
 	UpsertDocumentFunc   func(ctx context.Context, doc *domain.Document) error
 	GetDocumentFunc      func(ctx context.Context, id string) (*domain.Document, error)
+	FindBySHA256Func     func(ctx context.Context, tenantID, contentHash string) (*domain.Document, error)
 	UpsertHITLRequestFunc func(ctx context.Context, req *domain.HITLRequest) error
 	GetHITLRequestFunc    func(ctx context.Context, id string) (*domain.HITLRequest, error)
 	ListPendingHITLFunc  func(ctx context.Context, tenantID string) ([]*domain.HITLRequest, error)
@@ -720,6 +773,13 @@ func (m *CosmosAdapterMock) UpsertDocument(ctx context.Context, doc *domain.Docu
 func (m *CosmosAdapterMock) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	if m.GetDocumentFunc != nil {
 		return m.GetDocumentFunc(ctx, id)
+	}
+	return nil, nil
+}
+
+func (m *CosmosAdapterMock) FindBySHA256(ctx context.Context, tenantID, contentHash string) (*domain.Document, error) {
+	if m.FindBySHA256Func != nil {
+		return m.FindBySHA256Func(ctx, tenantID, contentHash)
 	}
 	return nil, nil
 }

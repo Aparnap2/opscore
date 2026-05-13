@@ -162,7 +162,7 @@ func TestFullWorkflow(t *testing.T) {
 	t.Logf("  Workflow: %s", job.WorkflowType)
 
 	// Update job status to running
-	job.Status = domain.JobStatusRunning
+	job.Status = domain.JobStatusProcessing
 	job.UpdatedAt = time.Now()
 	_ = cosmosAdapter.UpsertJob(ctx, job)
 
