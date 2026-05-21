@@ -1,8 +1,9 @@
-# OpsCore — Autonomous Back-Office for Indian B2B
+# OpsCore
 
-OpsCore is an autonomous back-office system for Indian B2B businesses. It ingests vendor documents (PDF invoices, onboarding forms, compliance notices) via API, validates Indian tax identifiers (GST, PAN, IFSC) using compiled Go regex, scores vendor risk using a deterministic formula, tracks vendor trust state through a five-state machine, and delivers a single structured Slack approval request. The owner clicks one button.
+Every B2B business owner starts as a craftsperson — a trader, a service expert. At five employees, the back-office collapses. Invoice processing, vendor ID verification, GST compliance — these are not skilled tasks, but they consume skilled people. OpsCore replaces the manual back-office with a system that produces identical results every time, with no human in the loop except for the final approval decision.
 
 **Live demo:** https://opscore-functions-linux.azurewebsites.net/api/health
+**Loom walkthrough:** *(coming soon)*
 
 ---
 
