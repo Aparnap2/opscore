@@ -63,3 +63,6 @@ htmlcov/
 # Logs & OS
 *.log
 .DS_Store
+
+# opencode agent config
+.opencode/
