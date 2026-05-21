@@ -221,9 +221,10 @@ func HTTPJobApprovalHandler(ctx context.Context, w http.ResponseWriter, r *http.
 		for _, hitl := range hitlReqs {
 			if hitl.JobID == jobID {
 				hitl.Status = "APPROVED"
-				hitl.ApprovedBy = approvedBy
+				hitl.Decision = "approve"
+				hitl.Responder = approvedBy
 				now := time.Now()
-				hitl.ApprovedAt = &now
+				hitl.RespondedAt = &now
 				cosmosAdapter.UpsertHITLRequest(ctx, hitl)
 				break
 			}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/aparna/opscore/cmd/functions/handlers"
 	"github.com/aparna/opscore/internal/adapters/azure"
+	"github.com/aparna/opscore/internal/adapters/sarvam"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/middleware/ratelimit"
@@ -116,15 +117,24 @@ func main() {
 	// Initialize agents
 	validator := domain.NewIndiaValidator()
 
+	// Create Sarvam providers
+	var ocrProvider providers.OCRProvider
+	var llmProvider providers.LLMProvider
+
+	sarvamAPIKey := getEnv("SARVAM_API_KEY", "")
+	if sarvamAPIKey != "" {
+		ocrProvider = sarvam.NewOCRAdapter(sarvam.OCRConfig{APIKey: sarvamAPIKey})
+		llmProvider = sarvam.NewLLMAdapter(sarvam.LLMConfig{APIKey: sarvamAPIKey})
+	}
+
 	// Document Agent
 	var docAgent *agents.DocumentAgent
 	if blobAdapter != nil && queueAdapter != nil && cosmosAdapter != nil {
-		// Create OCR provider stub
 		docAgent = agents.NewDocumentAgent(
 			blobAdapter,
 			queueAdapter,
 			cosmosAdapter,
-			nil, // OCR provider
+			ocrProvider,
 			validator,
 		)
 	}
@@ -135,7 +145,7 @@ func main() {
 		vendorAgent = agents.NewVendorAgent(
 			cosmosAdapter,
 			validator,
-			nil, // LLM provider
+			llmProvider,
 		)
 	}
 

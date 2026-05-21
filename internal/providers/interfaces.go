@@ -84,16 +84,6 @@ type DBProvider interface {
 	AppendAuditEvent(ctx context.Context, event *domain.AuditEvent) error
 	ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error)
 
-	VectorSearch(ctx context.Context, collection string, embedding []float32, topK int) ([]VectorMatch, error)
-
-	// Queue operations (optional)
-	QueueEnqueue(ctx context.Context, queueName string, message any) (string, error)
-}
-
-type VectorMatch struct {
-	Payload map[string]interface{} `json:"payload"`
-	ID      string                 `json:"id"`
-	Score   float64                `json:"score"`
 }
 
 type HITLProvider interface {

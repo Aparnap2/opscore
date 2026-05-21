@@ -193,8 +193,6 @@ func (m *MockDBProvider) ListPendingHITL(ctx context.Context, tenantID string) (
 
 func (m *MockDBProvider) AppendAuditEvent(ctx context.Context, event *domain.AuditEvent) error { return nil }
 func (m *MockDBProvider) ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) { return nil, nil }
-func (m *MockDBProvider) VectorSearch(ctx context.Context, collection string, embedding []float32, topK int) ([]providers.VectorMatch, error) { return nil, nil }
-func (m *MockDBProvider) QueueEnqueue(ctx context.Context, queueName string, message any) (string, error) { return "", nil }
 
 // =============================================================================
 // TEST 1: DOCUMENT INGESTION E2E
@@ -664,10 +662,9 @@ func TestVendorOnboardingE2E(t *testing.T) {
 				ID:         uuid.New().String(),
 				TenantID:   TestTenantID,
 				JobID:      vendor.ID,
-				Type:       "VENDOR_APPROVAL",
-				Message:    fmt.Sprintf("High-risk vendor approval required. Risk score: %d, Risk tier: %s", vendor.RiskScore, vendor.RiskTier),
+				Reason:     fmt.Sprintf("High-risk vendor approval required. Risk score: %d, Risk tier: %s", vendor.RiskScore, vendor.RiskTier),
 				Status:     "pending",
-				CreatedAt:  time.Now(),
+				SentAt:     time.Now(),
 			}
 
 			err := db.UpsertHITLRequest(ctx, hitlReq)
@@ -685,8 +682,8 @@ func TestVendorOnboardingE2E(t *testing.T) {
 				t.Errorf("Expected HITL status 'pending', got %s", retrieved.Status)
 			}
 
-			if !strings.Contains(retrieved.Message, "High-risk") {
-				t.Error("Expected HITL message to mention high-risk")
+			if !strings.Contains(retrieved.Reason, "High-risk") {
+				t.Error("Expected HITL reason to mention high-risk")
 			}
 
 			t.Logf("HITL triggered for high-risk vendor: %s", hitlReq.ID)
@@ -925,10 +922,9 @@ func TestComplianceE2E(t *testing.T) {
 			ID:         ticketID,
 			TenantID:   TestTenantID,
 			JobID:      "compliance-gap-001",
-			Type:       "COMPLIANCE_TICKET",
-			Message:    "SEBI KYC Update: Quarterly re-verification required. Action: Update verification frequency from annual to quarterly. Priority: HIGH.",
+			Reason:     "SEBI KYC Update: Quarterly re-verification required. Action: Update verification frequency from annual to quarterly. Priority: HIGH.",
 			Status:     "HIGH",
-			CreatedAt:  time.Now(),
+			SentAt:     time.Now(),
 		}
 
 		err := db.UpsertHITLRequest(ctx, ticket)
@@ -942,15 +938,11 @@ func TestComplianceE2E(t *testing.T) {
 			t.Fatalf("Failed to retrieve ticket: %v", err)
 		}
 
-		if retrieved.Type != "COMPLIANCE_TICKET" {
-			t.Errorf("Expected ticket type COMPLIANCE_TICKET, got %s", retrieved.Type)
+		if !strings.Contains(retrieved.Reason, "SEBI") {
+			t.Error("Expected ticket reason to reference SEBI")
 		}
 
-		if !strings.Contains(retrieved.Message, "SEBI") {
-			t.Error("Expected ticket message to reference SEBI")
-		}
-
-		if !strings.Contains(retrieved.Message, "HIGH") {
+		if !strings.Contains(retrieved.Reason, "HIGH") {
 			t.Error("Expected ticket to have HIGH priority")
 		}
 

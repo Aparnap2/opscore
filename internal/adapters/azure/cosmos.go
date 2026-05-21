@@ -690,16 +690,6 @@ func (c *CosmosAdapter) ListAuditEvents(ctx context.Context, tenantID, targetTyp
 	return events, nil
 }
 
-// VectorSearch performs a vector similarity search
-func (c *CosmosAdapter) VectorSearch(ctx context.Context, collection string, embedding []float32, topK int) ([]providers.VectorMatch, error) {
-	return nil, fmt.Errorf("VectorSearch not fully implemented - requires vector search index setup")
-}
-
-// QueueEnqueue adds a message to a queue (stub for queue integration)
-func (c *CosmosAdapter) QueueEnqueue(ctx context.Context, queueName string, message any) (string, error) {
-	return "", fmt.Errorf("QueueEnqueue not implemented - use Azure Queue Storage adapter")
-}
-
 var _ providers.DBProvider = (*CosmosAdapter)(nil)
 
 // CosmosAdapterMock implements DBProvider for testing
@@ -718,7 +708,6 @@ type CosmosAdapterMock struct {
 	ListPendingHITLFunc  func(ctx context.Context, tenantID string) ([]*domain.HITLRequest, error)
 	AppendAuditEventFunc  func(ctx context.Context, event *domain.AuditEvent) error
 	ListAuditEventsFunc  func(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error)
-	VectorSearchFunc    func(ctx context.Context, collection string, embedding []float32, topK int) ([]providers.VectorMatch, error)
 }
 
 func (m *CosmosAdapterMock) UpsertJob(ctx context.Context, job *domain.Job) error {
@@ -817,17 +806,6 @@ func (m *CosmosAdapterMock) ListAuditEvents(ctx context.Context, tenantID, targe
 		return m.ListAuditEventsFunc(ctx, tenantID, targetType, targetID, limit)
 	}
 	return nil, nil
-}
-
-func (m *CosmosAdapterMock) VectorSearch(ctx context.Context, collection string, embedding []float32, topK int) ([]providers.VectorMatch, error) {
-	if m.VectorSearchFunc != nil {
-		return m.VectorSearchFunc(ctx, collection, embedding, topK)
-	}
-	return nil, nil
-}
-
-func (m *CosmosAdapterMock) QueueEnqueue(ctx context.Context, queueName string, message any) (string, error) {
-	return "", nil
 }
 
 var _ providers.DBProvider = (*CosmosAdapterMock)(nil)

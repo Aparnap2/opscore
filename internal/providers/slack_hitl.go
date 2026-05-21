@@ -60,7 +60,7 @@ func (s *SlackHITLProvider) SendApprovalRequest(ctx context.Context, req *domain
 
 	textBlock := slack.NewTextBlockObject(
 		slack.MarkdownType,
-		fmt.Sprintf("*OpsCore Approval Request*\n\n*Type:* %s\n*Message:* %s\n*Job ID:* %s", req.Type, req.Message, req.JobID),
+		fmt.Sprintf("*OpsCore Approval Request*\n\n*Reason:* %s\n*Job ID:* %s", req.Reason, req.JobID),
 		false,
 		false,
 	)

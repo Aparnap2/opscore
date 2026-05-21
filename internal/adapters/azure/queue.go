@@ -4,64 +4,194 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azqueue"
 
 	"github.com/aparna/opscore/internal/providers"
 )
 
-// QueueConfig holds Azure Queue Storage configuration
 type QueueConfig struct {
 	ConnectionString string
 	AccountName    string
 	AccountKey    string
 }
 
-// QueueAdapter implements providers.QueueProvider for Azure Queue Storage
-// Note: Requires github.com/Azure/azure-sdk-for-go/sdk/storage/azqueue for full implementation
 type QueueAdapter struct {
 	accountName string
 	accountURL string
+	credential *azqueue.SharedKeyCredential
 }
 
-// NewQueueAdapter creates a new Azure Queue adapter
 func NewQueueAdapter(config QueueConfig) (*QueueAdapter, error) {
+	if config.ConnectionString != "" {
+		parts := strings.Split(config.ConnectionString, ";")
+		for _, part := range parts {
+			if strings.HasPrefix(part, "AccountName=") {
+				if config.AccountName == "" {
+					config.AccountName = strings.TrimPrefix(part, "AccountName=")
+				}
+			}
+			if strings.HasPrefix(part, "AccountKey=") {
+				if config.AccountKey == "" {
+					config.AccountKey = strings.TrimPrefix(part, "AccountKey=")
+				}
+			}
+		}
+	}
+
+	cred, err := azqueue.NewSharedKeyCredential(config.AccountName, config.AccountKey)
+	if err != nil {
+		return nil, fmt.Errorf("creating queue credential: %w", err)
+	}
+
 	return &QueueAdapter{
 		accountName: config.AccountName,
 		accountURL:  fmt.Sprintf("https://%s.queue.core.windows.net/", config.AccountName),
+		credential:  cred,
 	}, nil
 }
 
-// Enqueue adds a message to the queue
-// TODO: Implement with actual Azure SDK
+func (q *QueueAdapter) getClient(queueName string) (*azqueue.QueueClient, error) {
+	client, err := azqueue.NewQueueClientWithSharedKeyCredential(
+		fmt.Sprintf("%s%s", q.accountURL, queueName),
+		q.credential,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating queue client: %w", err)
+	}
+	return client, nil
+}
+
+func (q *QueueAdapter) ensureQueue(ctx context.Context, queueName string) (*azqueue.QueueClient, error) {
+	client, err := q.getClient(queueName)
+	if err != nil {
+		return nil, err
+	}
+	_, err = client.Create(ctx, nil)
+	if err != nil && !strings.Contains(err.Error(), "QueueAlreadyExists") {
+		return nil, fmt.Errorf("creating queue %s: %w", queueName, err)
+	}
+	return client, nil
+}
+
 func (q *QueueAdapter) Enqueue(ctx context.Context, queueName string, message any) (string, error) {
-	// Stub implementation - requires Azure SDK setup
-	// TODO: Replace with azqueue.Client implementation
-	return "", fmt.Errorf("QueueAdapter.Enqueue not implemented - requires Azure SDK setup")
+	client, err := q.ensureQueue(ctx, queueName)
+	if err != nil {
+		return "", err
+	}
+
+	body, err := json.Marshal(message)
+	if err != nil {
+		return "", fmt.Errorf("marshaling message: %w", err)
+	}
+
+	resp, err := client.EnqueueMessage(ctx, string(body), nil)
+	if err != nil {
+		return "", fmt.Errorf("enqueueing message: %w", err)
+	}
+
+	if len(resp.Messages) == 0 {
+		return "", fmt.Errorf("no message ID returned from queue")
+	}
+
+	return *resp.Messages[0].MessageID, nil
 }
 
-// Dequeue retrieves a message from the queue
-// TODO: Implement with actual Azure SDK
 func (q *QueueAdapter) Dequeue(ctx context.Context, queueName string) (*providers.QueueMessage, error) {
-	// Stub implementation - requires Azure SDK setup
-	return nil, fmt.Errorf("QueueAdapter.Dequeue not implemented - requires Azure SDK setup")
+	client, err := q.getClient(queueName)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.DequeueMessage(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dequeueing message: %w", err)
+	}
+
+	if len(resp.Messages) == 0 {
+		return nil, nil
+	}
+
+	msg := resp.Messages[0]
+	popReceipt := ""
+	if msg.PopReceipt != nil {
+		popReceipt = *msg.PopReceipt
+	}
+
+	return &providers.QueueMessage{
+		ID:           fmt.Sprintf("%s|%s", *msg.MessageID, popReceipt),
+		Body:         *msg.MessageText,
+		DequeueCount: int(*msg.DequeueCount),
+	}, nil
 }
 
-// Delete removes a message from the queue
-// TODO: Implement with actual Azure SDK
 func (q *QueueAdapter) Delete(ctx context.Context, queueName, messageID string) error {
-	// Stub implementation - requires Azure SDK setup
-	return fmt.Errorf("QueueAdapter.Delete not implemented - requires Azure SDK setup")
+	client, err := q.getClient(queueName)
+	if err != nil {
+		return err
+	}
+
+	msgID, popReceipt := q.parseMessageID(messageID)
+
+	_, err = client.DeleteMessage(ctx, msgID, popReceipt, nil)
+	if err != nil {
+		return fmt.Errorf("deleting message: %w", err)
+	}
+
+	return nil
 }
 
-// Poison marks a message as poison for retry handling
-// TODO: Implement with actual Azure SDK
 func (q *QueueAdapter) Poison(ctx context.Context, queueName, messageID string) error {
-	// Stub implementation - requires Azure SDK setup
-	return fmt.Errorf("QueueAdapter.Poison not implemented - requires Azure SDK setup")
+	poisonQueueName := queueName + "-poison"
+
+	poisonClient, err := q.ensureQueue(ctx, poisonQueueName)
+	if err != nil {
+		return err
+	}
+
+	msgID, popReceipt := q.parseMessageID(messageID)
+
+	client, err := q.getClient(queueName)
+	if err != nil {
+		return err
+	}
+
+	getResp, err := client.PeekMessage(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("peeking message for poison: %w", err)
+	}
+
+	if len(getResp.Messages) == 0 {
+		return fmt.Errorf("message not found for poison: %s", msgID)
+	}
+
+	poisonBody := *getResp.Messages[0].MessageText
+
+	_, err = poisonClient.EnqueueMessage(ctx, poisonBody, nil)
+	if err != nil {
+		return fmt.Errorf("enqueueing to poison queue: %w", err)
+	}
+
+	_, err = client.DeleteMessage(ctx, msgID, popReceipt, nil)
+	if err != nil {
+		return fmt.Errorf("deleting original message after poison: %w", err)
+	}
+
+	return nil
+}
+
+func (q *QueueAdapter) parseMessageID(messageID string) (string, string) {
+	parts := strings.SplitN(messageID, "|", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return messageID, ""
 }
 
 var _ providers.QueueProvider = (*QueueAdapter)(nil)
 
-// QueueAdapterMock implements QueueProvider for testing
 type QueueAdapterMock struct {
 	EnqueueFunc func(ctx context.Context, queueName string, message any) (string, error)
 	DequeueFunc func(ctx context.Context, queueName string) (*providers.QueueMessage, error)
@@ -98,9 +228,3 @@ func (m *QueueAdapterMock) Poison(ctx context.Context, queueName, messageID stri
 }
 
 var _ providers.QueueProvider = (*QueueAdapterMock)(nil)
-
-// Stub function to avoid import error when azqueue is not available
-func init() {
-	_, _ = json.Marshal(nil)
-	_ = context.Background()
-}

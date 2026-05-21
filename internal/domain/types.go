@@ -66,6 +66,7 @@ func (s JobStatus) IsFailed() bool {
 }
 
 type AuditEvent struct {
+	ID            string    `json:"id,omitempty"`
 	TenantID      string    `json:"tenant_id"`
 	Actor         string    `json:"actor"`
 	Action        string    `json:"action"`
@@ -93,16 +94,27 @@ type Job struct {
 	// Batch job fields for bundle splitting
 	ParentBatchID string `json:"parent_batch_id,omitempty"` // for child jobs
 	IsChildJob    bool   `json:"is_child_job,omitempty"`
+	// PRD v4.0 fields
+	BlobURL       string      `json:"blob_url,omitempty"`
+	DocumentType  string      `json:"document_type,omitempty"`
+	Confidence    float64     `json:"confidence,omitempty"`
+	Extracted     interface{} `json:"extracted_data,omitempty"`
+	RiskFlags     []string    `json:"risk_flags,omitempty"`
+	HITLReason    string      `json:"hitl_reason,omitempty"`
 }
 
 // ComplianceChunk represents a chunk of a document for compliance processing
 type ComplianceChunk struct {
-	ID           string `json:"id"`
-	TenantID     string `json:"tenant_id"`
-	Content      string `json:"content"`
-	ChunkIndex   int    `json:"chunk_index"`
-	DocumentType string `json:"document_type,omitempty"`
-	PageNumber   int    `json:"page_number,omitempty"`
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	SourceURL    string    `json:"source_url"`
+	SourceHash   string    `json:"source_hash"`
+	Content      string    `json:"content"`
+	ChunkIndex   int       `json:"chunk_index"`
+	Severity     string    `json:"severity"`
+	CreatedAt    time.Time `json:"created_at"`
+	DocumentType string    `json:"document_type,omitempty"`
+	PageNumber   int       `json:"page_number,omitempty"`
 }
 
 type Vendor struct {
@@ -119,6 +131,10 @@ type Vendor struct {
 	TenantID     string       `json:"tenant_id"`
 	RiskScore    int          `json:"risk_score"`
 	Approved     bool         `json:"approved"`
+	// PRD v4.0 fields
+	RiskFlags          []string   `json:"risk_flags,omitempty"`
+	Status             string     `json:"status,omitempty"`
+	LastTransactionAt *time.Time `json:"last_transaction_at,omitempty"`
 }
 
 type Document struct {
@@ -135,13 +151,14 @@ type Document struct {
 }
 
 type HITLRequest struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	ApprovedAt *time.Time `json:"approved_at,omitempty"`
-	ID         string     `json:"id"`
-	TenantID   string     `json:"tenant_id"`
-	JobID      string     `json:"job_id"`
-	Type       string     `json:"type"`
-	Message    string     `json:"message"`
-	Status     string     `json:"status"`
-	ApprovedBy string     `json:"approved_by,omitempty"`
+	ID           string     `json:"id"`
+	TenantID     string     `json:"tenant_id"`
+	JobID        string     `json:"job_id"`
+	Reason       string     `json:"reason"`
+	Status       string     `json:"status"`
+	SentAt       time.Time  `json:"sent_at"`
+	RespondedAt *time.Time `json:"responded_at,omitempty"`
+	Responder    string     `json:"responder,omitempty"`
+	Decision     string     `json:"decision,omitempty"`
+	SlackTS      string     `json:"slack_ts,omitempty"`
 }

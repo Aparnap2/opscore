@@ -167,13 +167,12 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 	// Create HITL if needed
 	if result["needs_hitl"].(bool) {
 		hitlReq := &domain.HITLRequest{
-			ID:        fmt.Sprintf("hitl-%s", job.JobID),
-			TenantID:  job.TenantID,
-			JobID:     job.JobID,
-			Type:     "VENDOR_APPROVAL",
-			Message:  fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
+			ID:       fmt.Sprintf("hitl-%s", job.JobID),
+			TenantID: job.TenantID,
+			JobID:    job.JobID,
+			Reason:   fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
 			Status:   "PENDING",
-			CreatedAt: time.Now(),
+			SentAt:   time.Now(),
 		}
 
 		if err := a.db.UpsertHITLRequest(ctx, hitlReq); err != nil {
@@ -206,17 +205,11 @@ func (a *VendorAgent) CheckDuplicate(ctx context.Context, tenantID, name string)
 	return false, nil
 }
 
-// QueueVendor adds a vendor to the processing queue
-func (a *VendorAgent) QueueVendor(ctx context.Context, job *VendorJob) (string, error) {
-	return a.db.QueueEnqueue(ctx, "vendor-queue", job)
-}
-
 // VendorAgentTools returns the list of tools available to this agent
 func (a *VendorAgent) VendorAgentTools() []string {
 	return []string{
 		"process_vendor",
 		"validate_vendor",
 		"check_duplicate",
-		"queue_vendor",
 	}
 }

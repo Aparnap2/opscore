@@ -223,13 +223,12 @@ func (a *ComplianceAgent) ClassifySeverity(ctx context.Context, title, content s
 // CreateTicket creates a compliance ticket
 func (a *ComplianceAgent) CreateTicket(ctx context.Context, tenantID, title, description, severity string) error {
 	ticket := &domain.HITLRequest{
-		ID:        fmt.Sprintf("ticket-%d", time.Now().Unix()),
-		TenantID:  tenantID,
-		JobID:     title,
-		Type:      "COMPLIANCE_TICKET",
-		Message:   description,
-		Status:    severity, // Use as severity marker
-		CreatedAt: time.Now(),
+		ID:       fmt.Sprintf("ticket-%d", time.Now().Unix()),
+		TenantID: tenantID,
+		JobID:    title,
+		Reason:   description,
+		Status:   severity, // Use as severity marker
+		SentAt:   time.Now(),
 	}
 
 	return a.db.UpsertHITLRequest(ctx, ticket)

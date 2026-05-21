@@ -18,12 +18,11 @@ func TestSlackHITLApproveRejectCallbacks(t *testing.T) {
 	provider := providers.NewSlackHITLProvider("test-token")
 
 	hitlReq := &domain.HITLRequest{
-		ID:      "hitl-test-123",
+		ID:       "hitl-test-123",
 		TenantID: "tenant-abc",
-		JobID:   "job-456",
-		Type:   "DOCUMENT_APPROVAL",
-		Message: "Invoice #INV-2024-001 requires approval",
-		Status: "PENDING",
+		JobID:    "job-456",
+		Reason:   "Invoice #INV-2024-001 requires approval",
+		Status:   "PENDING",
 	}
 
 	// Verify SendApprovalRequest doesn't error (current placeholder)
@@ -104,12 +103,11 @@ func TestSlackHITLApproveRejectCallbacks(t *testing.T) {
 // TestSlackBlockKitMessageStructure verifies the structure of Block Kit messages
 func TestSlackBlockKitMessageStructure(t *testing.T) {
 	hitlReq := &domain.HITLRequest{
-		ID:      "hitl-struct-123",
+		ID:       "hitl-struct-123",
 		TenantID: "tenant-abc",
-		JobID:   "job-456",
-		Type:   "VENDOR_APPROVAL",
-		Message: "Vendor ACME Corp requires approval",
-		Status: "PENDING",
+		JobID:    "job-456",
+		Reason:   "Vendor ACME Corp requires approval",
+		Status:   "PENDING",
 	}
 
 	// Verify HITLRequest has required fields

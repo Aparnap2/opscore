@@ -143,13 +143,12 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 	// Create HITL request if needed
 	if needsHITL {
 		hitlReq := &domain.HITLRequest{
-			ID:        fmt.Sprintf("hitl-%s", job.JobID),
-			TenantID:  job.TenantID,
+			ID:       fmt.Sprintf("hitl-%s", job.JobID),
+			TenantID: job.TenantID,
 			JobID:    job.JobID,
-			Type:     "DOCUMENT_APPROVAL",
-			Message:  fmt.Sprintf("Document %s requires approval: confidence=%.2f, errors=%d", job.FileName, ocrResult.Confidence, len(validations.Errors)),
+			Reason:   fmt.Sprintf("Document %s requires approval: confidence=%.2f, errors=%d", job.FileName, ocrResult.Confidence, len(validations.Errors)),
 			Status:   "PENDING",
-			CreatedAt: time.Now(),
+			SentAt:   time.Now(),
 		}
 
 		if err := a.db.UpsertHITLRequest(ctx, hitlReq); err != nil {

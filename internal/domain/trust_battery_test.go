@@ -248,7 +248,7 @@ func TestTrustBattery_AdvanceDays(t *testing.T) {
 
 func TestTrustBattery_ShouldDowngrade(t *testing.T) {
 	now := time.Now().UTC()
-	oldTime := now.Add(-91 * 24 * time.Hour)
+	oldTime := now.Add(-181 * 24 * time.Hour)
 	
 	tests := []struct {
 		name  string
@@ -271,7 +271,7 @@ func TestTrustBattery_ShouldDowngrade(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "90 days inactive triggers downgrade",
+			name: "180 days inactive triggers downgrade",
 			tb: &TrustBattery{
 				Tier:         TrustTierStandard,
 				LastActiveAt: &oldTime,

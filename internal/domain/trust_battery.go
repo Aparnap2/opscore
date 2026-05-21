@@ -176,7 +176,7 @@ func (tb *TrustBattery) ShouldDowngrade() bool {
 
 	if tb.LastActiveAt != nil {
 		daysInactive := int(time.Since(*tb.LastActiveAt).Hours() / 24)
-		if daysInactive >= 90 {
+		if daysInactive >= 180 {
 			return true
 		}
 	}

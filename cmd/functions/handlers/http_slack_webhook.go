@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -46,10 +47,11 @@ func HTTPSlackWebhookHandler(ctx context.Context, w http.ResponseWriter, r *http
 	configVal := ctx.Value(CtxKeyConfig)
 
 	// Determine if we can verify signatures
-	// Only verify if configVal is a valid map with signing secret
+	// Only verify in production - APP_ENV must be "production" for Slack signature verification
+	appEnv := os.Getenv("APP_ENV")
 	var signingSecret string
-	canVerify := false
-	if configVal != nil {
+	canVerify := appEnv == "production"
+	if canVerify && configVal != nil {
 		if cfgMap, ok := configVal.(map[string]string); ok {
 			signingSecret = cfgMap["SLACK_SIGNING_SECRET"]
 			canVerify = signingSecret != ""
@@ -59,8 +61,7 @@ func HTTPSlackWebhookHandler(ctx context.Context, w http.ResponseWriter, r *http
 		}
 	}
 
-	// Skip signature verification if config not available
-	// This allows url_verification to work without config
+	// Skip signature verification if not production or config not available
 	if canVerify {
 		// Verify Slack signature
 		signature := r.Header.Get("X-Slack-Signature")
@@ -80,8 +81,10 @@ func HTTPSlackWebhookHandler(ctx context.Context, w http.ResponseWriter, r *http
 			writeError(w, http.StatusUnauthorized, "Invalid signature")
 			return
 		}
-	} else {
-		log.Println("Warning: Config not available or missing signing secret, skipping signature verification")
+	} else if appEnv == "" {
+		log.Println("Warning: APP_ENV not set, skipping Slack signature verification")
+	} else if appEnv != "production" {
+		log.Printf("Info: APP_ENV=%s, skipping Slack signature verification (only enforced in production)", appEnv)
 	}
 
 	// Parse Slack payload
@@ -211,15 +214,17 @@ func handleSlackAction(ctx context.Context, r *http.Request, actionCallback Slac
 	case "approve":
 		job.Status = domain.JobStatusCompleted
 		hitlReq.Status = "APPROVED"
-		hitlReq.ApprovedBy = approvedBy
-		hitlReq.ApprovedAt = &now
+		hitlReq.Decision = "approve"
+		hitlReq.Responder = approvedBy
+		hitlReq.RespondedAt = &now
 		log.Printf("Approved job %s via Slack", jobID)
 
 	case "reject":
 		job.Status = domain.JobStatusFailed
 		hitlReq.Status = "REJECTED"
-		hitlReq.ApprovedBy = approvedBy
-		hitlReq.ApprovedAt = &now
+		hitlReq.Decision = "reject"
+		hitlReq.Responder = approvedBy
+		hitlReq.RespondedAt = &now
 		job.Error = "Rejected via Slack"
 		log.Printf("Rejected job %s via Slack", jobID)
 	}
