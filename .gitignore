@@ -59,5 +59,10 @@ htmlcov/
 *.log
 .DS_Store
 
+# Azure Functions artifacts (legacy)
+handler
+handler.exe
+*.zip
+
 # opencode agent config
 .opencode/
