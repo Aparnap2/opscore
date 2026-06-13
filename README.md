@@ -2,7 +2,6 @@
 
 Every B2B business owner starts as a craftsperson — a trader, a service expert. At five employees, the back-office collapses. Invoice processing, vendor ID verification, GST compliance — these are not skilled tasks, but they consume skilled people. OpsCore replaces the manual back-office with a system that produces identical results every time, with no human in the loop except for the final approval decision.
 
-**Live demo:** https://opscore-functions-linux.azurewebsites.net/api/health
 **Loom walkthrough:** *(coming soon)*
 
 ---
@@ -31,16 +30,13 @@ You upload a PDF invoice
 | Layer | Technology |
 |-------|------------|
 | Language | Go 1.22+ |
-| Deployment | Azure Functions (Consumption Y1, zero idle cost) |
-| Database | Azure Cosmos DB NoSQL (free tier) |
-| Storage | Azure Blob Storage (Standard LRS) |
-| Queue | Azure Queue Storage (always-free) |
+| Deployment | Docker container (any cloud) |
+| Database | PostgreSQL 16 |
+| Storage | MinIO / S3-compatible |
+| Queue | Redis 7 |
 | OCR | Sarvam Document Intelligence |
 | LLM | Sarvam-M (used only when OCR confidence < 0.85) |
 | HITL | Slack Block Kit |
-| Observability | Azure Application Insights |
-
-**₹0/month** at demo scale. All services within always-free tiers.
 
 ---
 
@@ -52,19 +48,20 @@ git clone https://github.com/Aparnap2/opscore.git
 cd opscore
 
 # 2. Configure
-cp .env.example local.settings.json
-# Fill in: AzureWebJobsStorage, COSMOS_ENDPOINT, COSMOS_KEY, SARVAM_API_KEY
+cp .env.example .env
+# Fill in: DATABASE_URL, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, REDIS_ADDR, SARVAM_API_KEY
 
-# 3. Start emulators (for local dev)
-docker compose -f docker-compose.test.yml up -d
+# 3. Start services
+docker compose up -d
 
-# 4. Build & run
-go build -o handler ./cmd/functions
-go run ./cmd/migrate   # create Cosmos containers
-func start
+# 4. Create database tables
+go run ./cmd/migrate
 
-# 5. Test
-curl http://localhost:7071/api/health
+# 5. Start server
+go run ./cmd/server
+
+# 6. Test
+curl http://localhost:8080/health
 ```
 
 ---
@@ -80,7 +77,7 @@ curl http://localhost:7071/api/health
 | `GET /api/vendors/{id}` | Get vendor status |
 | `POST /api/slack/webhook` | Slack callbacks |
 
-All endpoints except `/health` require `x-functions-key` header.
+All endpoints except `/health` require `X-Tenant-ID` header.
 
 ---
 
