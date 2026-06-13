@@ -1,14 +1,13 @@
-# OpsCore v2.0 - CD Staging Pipeline
+# OpsCore v3.0 - CD Staging Pipeline
 #
 # Runs on: push to main
-# Deploys to: staging Azure Functions
+# Builds and pushes a Docker image to GitHub Container Registry
 #
 # Steps:
-#   - Validate Bicep template
-#   - Build Go application
-#   - Deploy infrastructure (staging)
-#   - Deploy Functions code
-#   - Run smoke tests
+#   - Run unit tests
+#   - Build Go binary
+#   - Build and push Docker image
+#   - Run smoke test against built container
 
 name: CD Staging
 
@@ -25,53 +24,17 @@ on:
 
 env:
   GO_VERSION: '1.25'
-  AZURE_VERSION: '3.383.0'
-  ENVIRONMENT: 'staging'
-  RESOURCE_GROUP: 'opscore-staging-rg'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  ENVIRONMENT: staging
 
 jobs:
   # =======================================================================
-  # Validate Infrastructure
+  # Unit Tests
   # =======================================================================
-  validate-infra:
-    name: Validate Infrastructure
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
-          enable-AzPSSession: true
-
-      - name: Set up Bicep
-        uses: azure/bicep-deploy@v1
-        with:
-          bicepVersion: 'v0.31.0'
-
-      - name: Validate Bicep template
-        run: |
-          az deployment group validate \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --template-file infra/main.bicep \
-            --parameters environment=staging \
-            --location eastus
-
-      - name: Check existing deployments
-        run: |
-          echo "Checking existing resources..."
-          az group show --name ${{ env.RESOURCE_GROUP }} || echo "Resource group does not exist"
-
-  # =======================================================================
-  # Build Application
-  # =======================================================================
-  build:
-    name: Build Application
-    runs-on: ubuntu-latest
-    needs: [validate-infra]
     
     steps:
       - name: Checkout code
@@ -82,221 +45,116 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Get dependencies
-        run: go mod download
-
       - name: Run unit tests
         run: go test ./internal/domain/... -v -race
 
-      - name: Build application
+      - name: Build check
+        run: go build ./...
+
+  # =======================================================================
+  # Build and Push Docker Image
+  # =======================================================================
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    if: |
+      !github.event.inputs.skip_deploy
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build Go binary
         run: |
           mkdir -p publish
-          go build -o publish/function-app ./cmd function
+          go build -o publish/opscore-server ./cmd/functions
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          name: function-app
-          path: publish/
-          retention-days: 7
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=staging-latest
+            type=sha,prefix=staging-
+            type=raw,value=${{ github.sha }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # =======================================================================
-  # Deploy Infrastructure
+  # Smoke Test
   # =======================================================================
-  deploy-infra:
-    name: Deploy Infrastructure
+  smoke-test:
+    name: Smoke Test
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build-and-push]
     if: |
       !github.event.inputs.skip_deploy
-    permissions:
-      id-token: write
-      contents: read
-    
-    environment: staging
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
-          enable-AzPSSession: true
-
-      - name: Set up Bicep
-        uses: azure/bicep-deploy@v1
-        with:
-          bicepVersion: 'v0.31.0'
-
-      - name: Deploy or update Bicep template
+      - name: Pull and run built image
         run: |
-          # Check if resource group exists
-          RG_EXISTS=$(az group exists --name ${{ env.RESOURCE_GROUP }} 2>/dev/null || echo "false")
+          IMAGE="${{ needs.build-and-push.outputs.image_tag }}"
+          # Extract first tag from comma-separated list
+          FIRST_TAG=$(echo "$IMAGE" | cut -d',' -f1)
           
-          if [ "$RG_EXISTS" = "false" ]; then
-            echo "Creating resource group..."
-            az group create \
-              --name ${{ env.RESOURCE_GROUP }} \
-              --location eastus
-          fi
+          docker run -d \
+            --name opscore-staging \
+            -p 8080:8080 \
+            -e APP_ENV=staging \
+            -e PORT=8080 \
+            "$FIRST_TAG"
           
-          # Deploy template
-          az deployment group create \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --template-file infra/main.bicep \
-            --parameters environment=staging \
-            --location eastus \
-            --mode Incremental
-
-      - name: Get deployment outputs
-        run: |
-          echo "storageConnectionString=$(az deployment group show \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name main \
-            --query properties.outputs.storageConnectionString.value \
-            -o tsv)" >> $GITHUB_OUTPUT
-          
-          echo "cosmosDbEndpoint=$(az deployment group show \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name main \
-            --query properties.outputs.cosmosDbEndpoint.value \
-            -o tsv)" >> $GITHUB_OUTPUT
-          
-          echo "functionAppName=$(az deployment group show \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name main \
-            --query properties.outputs.functionAppName.value \
-            -o tsv)" >> $GITHUB_OUTPUT
-        id: outputs
-
-      - name: Upload deployment outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: deployment-outputs
-          path: ${{ github.outputs_file }}
-          retention-days: 7
-
-  # =======================================================================
-  # Deploy Azure Functions
-  # =======================================================================
-  deploy-functions:
-    name: Deploy Functions
-    runs-on: ubuntu-latest
-    needs: [deploy-infra]
-    if: |
-      !github.event.inputs.skip_deploy
-    permissions:
-      id-token: write
-      contents: read
-    
-    environment: staging
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: function-app
-          path: publish/
-
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
-          enable-AzPSSession: true
-
-      - name: Download Azure Functions Core Tools
-        run: |
-          wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-          sudo dpkg -i packages-microsoft-prod.deb
-          sudo apt-get update
-          sudo apt-get install azure-functions-core-tools-4
-          rm packages-microsoft-prod.deb
-
-      - name: Deploy to Azure Functions
-        run: |
-          FUNC_NAME="${{ needs.deploy-infra.outputs.functionAppName }}"
-          az functionapp deployment source config-zip \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name "$FUNC_NAME" \
-            --src publish/function-app.zip || \
-          func azure functionapp deployment "$FUNC_NAME" --publish-path publish/
-        shell: bash
-
-      - name: Verify deployment
-        run: |
-          FUNC_NAME="${{ needs.deploy-infra.outputs.functionAppName }}"
-          az functionapp show \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name "$FUNC_NAME" \
-            --query state
-
-      - name: Restart Functions
-        run: |
-          FUNC_NAME="${{ needs.deploy-infra.outputs.functionAppName }}"
-          az functionapp restart \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name "$FUNC_NAME }}"
-
-  # =======================================================================
-  # Smoke Tests
-  # =======================================================================
-  smoke-tests:
-    name: Smoke Tests
-    runs-on: ubuntu-latest
-    needs: [deploy-functions]
-    if: |
-      !github.event.inputs.skip_deploy
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download deployment outputs
-        uses: actions/download-artifact@v4
-        with:
-          name: deployment-outputs
-
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
-          enable-AzPSSession: true
-
-      - name: Get Function App URL
-        run: |
-          FUNC_URL="https://$(az functionapp show \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name opscore-staging-func \
-            --query defaultHostName \
-            -o tsv)/api/"
-          echo "FUNC_URL=$FUNC_URL"
+          # Wait for container to be ready
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            sleep 2
+          done
 
       - name: Test health endpoint
         run: |
-          curl -f "${FUNC_URL}health" || echo "Health check failed"
-        shell: bash
+          curl -sf http://localhost:8080/health || echo "Health check failed"
+          curl -sf http://localhost:8080/api/health || echo "API health check failed"
 
-      - name: Test API ready
-        run: |
-          # Test that Functions are responding
-          ENDPOINTS=(
-            "health"
-          )
-          
-          for endpoint in "${ENDPOINTS[@]}"; do
-            status=$(curl -sf -o /dev/null -w "%{http_code}" \
-              "${FUNC_URL}${endpoint}" || echo "000")
-            echo "Endpoint ${endpoint}: $status"
-          done
-
-      - name: Run Go tests
-        run: |
-          go test ./internal/... -v -short
+      - name: Stop container
+        if: always()
+        run: docker stop opscore-staging && docker rm opscore-staging
 
   # =======================================================================
   # Notify Ready for Review
@@ -304,7 +162,7 @@ jobs:
   notify:
     name: Notify Ready
     runs-on: ubuntu-latest
-    needs: [smoke-tests]
+    needs: [smoke-test]
     if: always()
     
     steps:
@@ -313,7 +171,7 @@ jobs:
           echo "## Staging Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Environment: staging" >> $GITHUB_STEP_SUMMARY
-          echo "- Status: ${{ needs.smoke-tests.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Resources: Azure Functions, Cosmos DB, Storage, App Insights" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ needs.smoke-test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: ghcr.io/${{ github.repository }}:staging-latest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Ready for production deployment with tag v*." >> $GITHUB_STEP_SUMMARY

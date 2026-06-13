@@ -1,23 +1,3 @@
-/*
-Migrate is a one-off migration tool for setting up Cosmos DB containers.
-
-Usage:
-	COSMOS_ENDPOINT=https://<account>.documents.azure.com:443 \
-	COSMOS_KEY=<primary-key> \
-	go run cmd/migrate/main.go
-
-This will create the following containers if they don't already exist:
-	- jobs (partition key: /tenant_id)
-	- vendors (partition key: /tenant_id)
-	- documents (partition key: /tenant_id)
-	- compliance_chunks (partition key: /tenant_id)
-	- audit_events (partition key: /tenant_id)
-	- hitl_requests (partition key: /tenant_id)
-
-Required environment variables:
-	- COSMOS_ENDPOINT: The Cosmos DB account endpoint URL
-	- COSMOS_KEY: The Cosmos DB account primary key
-*/
 package main
 
 import (
@@ -25,136 +5,147 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-)
-
-const (
-	databaseName = "opscore"
-)
-
-// containerSpec defines a Cosmos DB container with its properties
-type containerSpec struct {
-	name          string
-	partitionKey string
-}
-
-var (
-	// containers defines all containers to create
-	containers = []containerSpec{
-		{name: "jobs", partitionKey: "/tenant_id"},
-		{name: "vendors", partitionKey: "/tenant_id"},
-		{name: "documents", partitionKey: "/tenant_id"},
-		{name: "compliance_chunks", partitionKey: "/tenant_id"},
-		{name: "audit_events", partitionKey: "/tenant_id"},
-		{name: "hitl_requests", partitionKey: "/tenant_id"},
-	}
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
+	}
+
 	ctx := context.Background()
 
-	// Validate required environment variables
-	endpoint := os.Getenv("COSMOS_ENDPOINT")
-	key := os.Getenv("COSMOS_KEY")
-
-	if endpoint == "" {
-		log.Fatal("COSMOS_ENDPOINT environment variable is required")
-	}
-	if key == "" {
-		log.Fatal("COSMOS_KEY environment variable is required")
-	}
-
-	log.Printf("Connecting to Cosmos DB at: %s", endpoint)
-
-	// Create Cosmos DB client
-	cred, err := azcosmos.NewKeyCredential(key)
+	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
-		log.Fatalf("Failed to create credential: %v", err)
+		log.Fatalf("connecting to postgres: %v", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatalf("pinging postgres: %v", err)
+	}
+	log.Println("Connected to PostgreSQL")
+
+	tables := []string{
+		`CREATE TABLE IF NOT EXISTS jobs (
+			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			workflow_type TEXT,
+			status TEXT,
+			blob_url TEXT,
+			document_type TEXT,
+			confidence FLOAT,
+			extracted_data JSONB,
+			risk_flags TEXT[],
+			hitl_reason TEXT,
+			input JSONB,
+			output JSONB,
+			error TEXT,
+			parent_batch_id TEXT,
+			is_child_job BOOL DEFAULT FALSE,
+			trace_id TEXT,
+			correlation_id TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS vendors (
+			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			name TEXT,
+			gst_number TEXT,
+			pan_number TEXT,
+			ifsc_code TEXT,
+			bank_account TEXT,
+			risk_tier TEXT,
+			risk_score INT DEFAULT 0,
+			approved BOOL DEFAULT FALSE,
+			risk_flags TEXT[],
+			status TEXT,
+			last_transaction_at TIMESTAMPTZ,
+			trust_battery JSONB,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS documents (
+			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			job_id TEXT,
+			file_name TEXT,
+			storage_path TEXT,
+			type TEXT,
+			status TEXT,
+			content_hash TEXT,
+			extracted JSONB,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS audit_events (
+			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			actor TEXT,
+			action TEXT,
+			target_type TEXT,
+			target_id TEXT,
+			old_state TEXT,
+			new_state TEXT,
+			trace_id TEXT,
+			correlation_id TEXT,
+			timestamp TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS hitl_requests (
+			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			job_id TEXT,
+			reason TEXT,
+			status TEXT,
+			sent_at TIMESTAMPTZ,
+			responded_at TIMESTAMPTZ,
+			responder TEXT,
+			decision TEXT,
+			slack_ts TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS compliance_chunks (
+			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			source_url TEXT,
+			source_hash TEXT,
+			content TEXT,
+			chunk_index INT,
+			severity TEXT,
+			document_type TEXT,
+			page_number INT,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
-	client, err := azcosmos.NewClientWithKey(endpoint, cred, nil)
-	if err != nil {
-		log.Fatalf("Failed to create Cosmos DB client: %v", err)
+	for _, ddl := range tables {
+		if _, err := pool.Exec(ctx, ddl); err != nil {
+			log.Fatalf("executing migration: %v", err)
+		}
+		fmt.Printf("Executed: %.80s...\n", ddl)
 	}
 
-	// Try to create database (may already exist)
-	log.Printf("Ensuring database '%s' exists...", databaseName)
-	_, err = client.CreateDatabase(ctx, azcosmos.DatabaseProperties{ID: databaseName}, nil)
-	if err != nil {
-		if isAlreadyExistsError(err) {
-			log.Printf("Database '%s' already exists", databaseName)
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_jobs_tenant_id ON jobs(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_vendors_tenant_id ON vendors(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_tenant_id ON documents(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_id ON audit_events(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_hitl_requests_tenant_id ON hitl_requests(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_compliance_chunks_tenant_id ON compliance_chunks(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status ON jobs(tenant_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(tenant_id, content_hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_hitl_requests_pending ON hitl_requests(tenant_id, status) WHERE status = 'pending'`,
+	}
+
+	for _, idx := range indexes {
+		if _, err := pool.Exec(ctx, idx); err != nil {
+			log.Printf("warning: creating index (may already exist): %v", err)
 		} else {
-			log.Fatalf("Failed to create database: %v", err)
-		}
-	} else {
-		log.Printf("Database '%s' created successfully", databaseName)
-	}
-
-	// Get database client
-	dbClient, err := client.NewDatabase(databaseName)
-	if err != nil {
-		log.Fatalf("Failed to get database client: %v", err)
-	}
-
-	// Create containers
-	log.Printf("Setting up %d containers...", len(containers))
-	for _, spec := range containers {
-		if err := createContainer(ctx, dbClient, spec); err != nil {
-			log.Fatalf("Failed to create container '%s': %v", spec.name, err)
+			fmt.Printf("Created index: %s\n", idx)
 		}
 	}
 
-	log.Println("Migration completed successfully!")
-}
-
-// createContainer creates a container if it doesn't exist
-func createContainer(ctx context.Context, dbClient *azcosmos.DatabaseClient, spec containerSpec) error {
-	// Try to read the container to check if it exists
-	_, err := dbClient.NewContainer(spec.name)
-	if err == nil {
-		log.Printf("  Container '%s' already exists, skipping", spec.name)
-		return nil
-	}
-
-	// Check if it's a not-found error or something else
-	if !isNotFoundError(err) {
-		return fmt.Errorf("error checking container: %w", err)
-	}
-
-	// Container doesn't exist, create it
-	log.Printf("  Creating container '%s' with partition key: %s", spec.name, spec.partitionKey)
-
-	_, err = dbClient.CreateContainer(ctx,
-		azcosmos.ContainerProperties{
-			ID: spec.name,
-			PartitionKeyDefinition: azcosmos.PartitionKeyDefinition{
-				Paths: []string{spec.partitionKey},
-			},
-		}, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create container: %w", err)
-	}
-
-	log.Printf("  Created container '%s'", spec.name)
-	return nil
-}
-
-// isNotFoundError checks if the error is a not-found error from Cosmos DB
-func isNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "ResourceNotFound") ||
-		strings.Contains(err.Error(), "404")
-}
-
-// isAlreadyExistsError checks if the error is an already-exists error from Cosmos DB
-func isAlreadyExistsError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "ResourceAlreadyExists") ||
-		strings.Contains(err.Error(), "409")
+	log.Println("Migration completed successfully")
 }

@@ -1,7 +1,7 @@
-# OpsCore v2.0 - CI Pipeline
-# 
+# OpsCore v3.0 - CI Pipeline
+#
 # Runs on: push to main, feature branches, and PRs
-# 
+#
 # Jobs:
 #   - unit: golangci-lint + unit tests (no external services)
 #   - integration: docker services + integration tests with -tags integration
@@ -56,20 +56,46 @@ jobs:
     needs: [unit]
     
     services:
-      # Cosmos DB emulator
-      cosmos:
-        image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+      # PostgreSQL
+      postgres:
+        image: postgres:16-alpine
         ports:
-          8081:8081
-          1234:1234
-        options: --memory 4g
+          5432:5432
+        env:
+          POSTGRES_DB: opscore
+          POSTGRES_USER: opscore
+          POSTGRES_PASSWORD: opscore
+        options: >-
+          --health-cmd "pg_isready -U opscore -d opscore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
-      # Azurite blob/queue storage
-      azurite:
-        image: mcr.microsoft.com/azure-storage/azurite:latest
+      # MinIO (S3-compatible storage)
+      minio:
+        image: minio/minio:latest
         ports:
-          10000:10000
-          10001:10001
+          9000:9000
+          9001:9001
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # Redis (queue + cache)
+      redis:
+        image: redis:7-alpine
+        ports:
+          6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
       # Mockoon slack mock
       mockoon:
@@ -100,10 +126,30 @@ jobs:
 
       - name: Wait for services
         run: |
-          echo "Waiting for Cosmos..."
-          sleep 30
-          echo "Waiting for Azurite..."
-          sleep 5
+          echo "Waiting for PostgreSQL..."
+          for i in {1..30}; do
+            if docker compose -f docker-compose.test.yml exec -T postgres pg_isready -U opscore -d opscore > /dev/null 2>&1; then
+              echo "PostgreSQL ready"
+              break
+            fi
+            sleep 1
+          done
+          echo "Waiting for MinIO..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+              echo "MinIO ready"
+              break
+            fi
+            sleep 1
+          done
+          echo "Waiting for Redis..."
+          for i in {1..15}; do
+            if redis-cli ping > /dev/null 2>&1; then
+              echo "Redis ready"
+              break
+            fi
+            sleep 1
+          done
           echo "Waiting for Mockoon..."
           for i in {1..30}; do
             if curl -sf http://localhost:3100/health > /dev/null 2>&1; then

@@ -8,10 +8,6 @@ bin/
 *.test
 *.out
 go.work
-handler
-handler.exe
-*.zip
-deploy.zip
 
 # Python (legacy from v1)
 __pycache__/
@@ -39,7 +35,6 @@ wheels/
 .env
 .env.local
 .env.*.local
-local.settings.json
 .venv
 venv/
 ENV/

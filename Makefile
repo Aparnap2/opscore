@@ -1,4 +1,10 @@
-.PHONY: test-unit test-integration test-all build lint fmt
+.PHONY: docker-up docker-down test-unit test-integration test-all build lint fmt run
+
+docker-up:
+	docker compose -f docker-compose.test.yml up -d
+
+docker-down:
+	docker compose -f docker-compose.test.yml down
 
 test-unit:
 	go test ./internal/domain/... -v -race
@@ -20,7 +26,4 @@ fmt:
 	go fmt ./...
 
 run:
-	go run ./cmd/functions/main.go
-
-test-e2e:
-	go test ./tests/e2e/... -v -tags e2e -timeout 600s
+	go run ./cmd/server/main.go
