@@ -11,12 +11,13 @@ import (
 
 // DocumentAgent handles document ingestion workflows
 type DocumentAgent struct {
-	storage   providers.StorageProvider
-	queue    providers.QueueProvider
-	db       providers.DBProvider
-	ocr      providers.OCRProvider
+	storage    providers.StorageProvider
+	queue      providers.QueueProvider
+	db         providers.DBProvider
+	ocr        providers.OCRProvider
 	classifier *DocumentClassifierWrapper
-	validator *domain.IndiaValidator
+	validator  *domain.IndiaValidator
+	tracer     providers.TracingProvider
 }
 
 // DocumentClassifierWrapper wraps the classifier for use with agents
@@ -31,11 +32,11 @@ func (c *DocumentClassifierWrapper) Classify(ctx context.Context, filename, cont
 	if contains(filename, "contract") {
 		return "CONTRACT", nil
 	}
-	if contains(filename, "po") || contains(filename, "purchase") {
-		return "PURCHASE_ORDER", nil
-	}
 	if contains(filename, "gst") {
 		return "GST", nil
+	}
+	if contains(filename, "po") || contains(filename, "purchase") {
+		return "PURCHASE_ORDER", nil
 	}
 	return "OTHER", nil
 }
@@ -72,14 +73,16 @@ func NewDocumentAgent(
 	db providers.DBProvider,
 	ocr providers.OCRProvider,
 	validator *domain.IndiaValidator,
+	tracer providers.TracingProvider,
 ) *DocumentAgent {
 	return &DocumentAgent{
-		storage:   storage,
-		queue:    queue,
-		db:       db,
-		ocr:      ocr,
+		storage:    storage,
+		queue:      queue,
+		db:         db,
+		ocr:        ocr,
 		classifier: &DocumentClassifierWrapper{},
-		validator: validator,
+		validator:  validator,
+		tracer:     tracer,
 	}
 }
 
@@ -94,32 +97,54 @@ type DocumentJob struct {
 }
 
 // ProcessDocument handles the complete document ingestion workflow
-func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (map[string]any, error) {
+func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (result map[string]any, err error) {
+	ctx, span := a.tracer.StartSpan(ctx, "document_agent.process",
+		providers.WithJobID(job.JobID),
+		providers.WithTenantID(job.TenantID),
+		providers.WithWorkflowType("document_ingestion"),
+	)
+	defer func() {
+		span.End(err)
+	}()
+
 	// Step 1: Classify document
+	span.SetAttribute("step", "classify")
 	docType, err := a.classifier.Classify(ctx, job.FileName, "pdf")
 	if err != nil {
 		return nil, fmt.Errorf("classifying document: %w", err)
 	}
+	span.SetAttribute("document_type", docType)
 
 	// Step 2: Run OCR
+	span.SetAttribute("step", "ocr")
+	if a.ocr == nil {
+		return nil, fmt.Errorf("OCR provider not configured (missing SARVAM_API_KEY)")
+	}
 	ocrResult, err := a.ocr.Extract(ctx, job.BlobURL)
 	if err != nil {
 		return nil, fmt.Errorf("OCR failed: %w", err)
 	}
+	span.SetAttribute("ocr_confidence", fmt.Sprintf("%.2f", ocrResult.Confidence))
+
+	// Record LLM call for OCR
+	a.tracer.RecordLLMCall(ctx, "sarvam-ocr", 0, 0.0, 0)
 
 	// Step 3: Validate extracted data
+	span.SetAttribute("step", "validate")
 	validations := a.validator.ValidateAll(ocrResult.KeyValues)
+	span.SetAttribute("validation_errors", fmt.Sprintf("%d", len(validations.Errors)))
 
 	// Step 4: Check if HITL is needed
 	needsHITL := ocrResult.Confidence < 0.85 || len(validations.Errors) > 0
+	span.SetAttribute("needs_hitl", fmt.Sprintf("%t", needsHITL))
 
-	result := map[string]any{
+	result = map[string]any{
 		"document_type": docType,
-		"text":        ocrResult.Text,
-		"confidence":  ocrResult.Confidence,
-		"key_values":  ocrResult.KeyValues,
-		"validations":  validations,
-		"needs_hitl":  needsHITL,
+		"text":          ocrResult.Text,
+		"confidence":    ocrResult.Confidence,
+		"key_values":    ocrResult.KeyValues,
+		"validations":   validations,
+		"needs_hitl":    needsHITL,
 	}
 
 	// Update job in database
