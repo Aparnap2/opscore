@@ -13,46 +13,8 @@ import (
 type VendorAgent struct {
 	db        providers.DBProvider
 	validator *domain.IndiaValidator
-	scorer    *RiskScorerWrapper
 	llm       providers.LLMProvider
-}
-
-// RiskScorerWrapper wraps risk scoring for agents
-type RiskScorerWrapper struct{}
-
-func (r *RiskScorerWrapper) ComputeScore(gst, pan, name, address string) int {
-	score := 0
-
-	// Simple scoring
-	if gst != "" {
-		score += 20
-	}
-	if pan != "" {
-		score += 20
-	}
-	if address != "" {
-		score += 10
-	}
-	if name != "" {
-		score += 10
-	}
-
-	// Add some risk for missing items
-	if gst == "" {
-		score -= 10
-	}
-	if pan == "" {
-		score -= 10
-	}
-
-	// Default to medium
-	if score < 30 {
-		score = 30
-	} else if score > 90 {
-		score = 90
-	}
-
-	return score
+	tracer    providers.TracingProvider
 }
 
 // NewVendorAgent creates a new vendor agent
@@ -60,12 +22,13 @@ func NewVendorAgent(
 	db providers.DBProvider,
 	validator *domain.IndiaValidator,
 	llm providers.LLMProvider,
+	tracer providers.TracingProvider,
 ) *VendorAgent {
 	return &VendorAgent{
 		db:        db,
 		validator: validator,
-		scorer:    &RiskScorerWrapper{},
 		llm:       llm,
+		tracer:    tracer,
 	}
 }
 
@@ -87,43 +50,72 @@ type VendorData struct {
 }
 
 // ProcessVendor handles the complete vendor onboarding workflow
-func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[string]any, error) {
+func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (result map[string]any, err error) {
+	ctx, span := a.tracer.StartSpan(ctx, "vendor_agent.process",
+		providers.WithJobID(job.JobID),
+		providers.WithTenantID(job.TenantID),
+		providers.WithWorkflowType("vendor_onboarding"),
+	)
+	defer func() {
+		span.End(err)
+	}()
+
 	data := job.VendorData
 
 	// Step 1: Validate identifiers
+	span.SetAttribute("step", "validate_identifiers")
 	validations := a.validator.ValidateVendor(data.GSTNumber, data.PANNumber, data.IFSCCode)
+	validationErrors := 0
+	if validations != nil {
+		validationErrors = len(validations.Errors)
+	}
+	span.SetAttribute("validation_errors", fmt.Sprintf("%d", validationErrors))
 
-	// Step 2: Compute risk score
-	riskScore := a.scorer.ComputeScore(data.GSTNumber, data.PANNumber, data.Name, data.Address)
+	// Step 2: Compute risk score using domain-level function
+	span.SetAttribute("step", "compute_risk")
+	vendorForRisk := &domain.Vendor{
+		GSTNumber: data.GSTNumber,
+		PANNumber: data.PANNumber,
+		IFSCCode:  data.IFSCCode,
+	}
+	riskResult := domain.ComputeVendorRisk(vendorForRisk, nil, nil, job.TenantID)
+	riskScore := riskResult.Score
+	span.SetAttribute("risk_score", fmt.Sprintf("%d", riskScore))
 
-	result := map[string]any{
+	needsHITL := riskScore >= 60 || validationErrors > 0
+
+	result = map[string]any{
 		"name":        data.Name,
 		"validations": validations,
 		"risk_score":  riskScore,
-		"trust_tier": domain.TrustTierStandard,
-		"needs_hitl":  riskScore >= 60 || (validations != nil && len(validations.Errors) > 0),
+		"trust_tier":  domain.TrustTierStandard,
+		"needs_hitl":  needsHITL,
 	}
 
 	// Step 3: LLM analysis for non-standard vendors (optional)
 	if a.llm != nil && len(data.Documents) > 0 {
+		span.SetAttribute("step", "llm_analysis")
 		prompt := fmt.Sprintf("Analyze vendor documents for %s: %v", data.Name, data.Documents)
-		reasoning, err := a.llm.Reason(ctx, prompt)
-		if err == nil {
+		reasoning, llmErr := a.llm.Reason(ctx, prompt)
+		if llmErr == nil {
 			result["llm_analysis"] = reasoning
+			a.tracer.RecordLLMCall(ctx, "sarvam-llm", 0, 0.0, 0)
 		}
 	}
 
 	// Determine trust battery
 	trustTier := domain.TrustTierProbation
-	if riskScore < 30 && (validations == nil || len(validations.Errors) == 0) {
+	if riskScore < 30 && validationErrors == 0 {
 		trustTier = domain.TrustTierPreferred
 	} else if riskScore < 60 {
 		trustTier = domain.TrustTierStandard
 	}
+	span.SetAttribute("trust_tier", string(trustTier))
 
 	result["trust_tier"] = trustTier
 
 	// Save vendor
+	span.SetAttribute("step", "save_vendor")
 	vendor := &domain.Vendor{
 		ID:           job.JobID,
 		TenantID:     job.TenantID,
@@ -131,19 +123,24 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 		GSTNumber:    data.GSTNumber,
 		PANNumber:    data.PANNumber,
 		IFSCCode:     data.IFSCCode,
-		BankAccount: data.BankAccount,
+		BankAccount:  data.BankAccount,
 		RiskScore:    riskScore,
-		RiskTier:     domain.RiskTierHigh,
-		TrustBattery: domain.TrustBattery{},
-		Approved:    riskScore < 60 && (validations == nil || len(validations.Errors) == 0),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		RiskTier:     riskResult.Tier,
+		TrustBattery: *domain.NewTrustBattery(),
+		Approved:     riskScore < 60 && validationErrors == 0,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
-	if vendor.RiskScore < 30 {
-		vendor.RiskTier = domain.RiskTierLow
-	} else if vendor.RiskScore < 60 {
-		vendor.RiskTier = domain.RiskTierMedium
+	// Set trust battery tier based on risk score
+	if riskScore >= 80 {
+		vendor.TrustBattery.Tier = domain.TrustTierPreferred
+	} else if riskScore >= 50 {
+		vendor.TrustBattery.Tier = domain.TrustTierStandard
+	} else if riskScore >= 30 {
+		vendor.TrustBattery.Tier = domain.TrustTierProbation
+	} else {
+		vendor.TrustBattery.Tier = domain.TrustTierBlocked
 	}
 
 	if err := a.db.UpsertVendor(ctx, vendor); err != nil {
@@ -151,13 +148,14 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 	}
 
 	// Create job record
+	span.SetAttribute("step", "upsert_job")
 	dbJob := &domain.Job{
 		ID:           job.JobID,
 		TenantID:     job.TenantID,
 		WorkflowType: domain.WorkflowVendorOnboarding,
-		Status:      domain.JobStatusCompleted,
-		UpdatedAt:  time.Now(),
-		Output:      result,
+		Status:       domain.JobStatusCompleted,
+		UpdatedAt:    time.Now(),
+		Output:       result,
 	}
 
 	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
@@ -165,7 +163,7 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (map[st
 	}
 
 	// Create HITL if needed
-	if result["needs_hitl"].(bool) {
+	if needsHITL {
 		hitlReq := &domain.HITLRequest{
 			ID:       fmt.Sprintf("hitl-%s", job.JobID),
 			TenantID: job.TenantID,
