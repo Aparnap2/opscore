@@ -11,9 +11,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +27,9 @@ import (
 	"github.com/aparna/opscore/internal/adapters/sarvam"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
+	"github.com/aparna/opscore/internal/middleware/ratelimit"
 	"github.com/aparna/opscore/internal/providers"
+	"github.com/aparna/opscore/internal/telemetry"
 )
 
 // ---------------------------------------------------------------------------
@@ -120,15 +125,15 @@ type HealthResponse struct {
 // ---------------------------------------------------------------------------
 
 type ServerDeps struct {
-	db       *postgres.Adapter
-	storage  *minio.Adapter
-	rq       *queue.RedisAdapter
-	docAgent *agents.DocumentAgent
+	db        *postgres.Adapter
+	storage   *minio.Adapter
+	rq        providers.QueueProvider
+	docAgent  *agents.DocumentAgent
 	vendAgent *agents.VendorAgent
 	compAgent *agents.ComplianceAgent
-
-	slackSigningSecret string
-	slackBotToken      string
+	slack     *providers.SlackHITLProvider
+	tracer    providers.TracingProvider
+	worker    *Worker
 }
 
 // ---------------------------------------------------------------------------
@@ -165,12 +170,12 @@ func (s *ServerDeps) healthHandler(w http.ResponseWriter, r *http.Request) {
 		health.Status = "degraded"
 	}
 
-	// Redis health.
-	if err := s.rq.Ping(ctx); err != nil {
-		health.Services["redis"] = "unhealthy: " + err.Error()
-		health.Status = "degraded"
+	// Queue health (Redis or PubSub).
+	if s.rq != nil {
+		health.Services["queue"] = "healthy"
 	} else {
-		health.Services["redis"] = "healthy"
+		health.Services["queue"] = "unhealthy: not initialized"
+		health.Status = "degraded"
 	}
 
 	status := http.StatusOK
@@ -570,21 +575,36 @@ func (s *ServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Request)
 
 	// Verify Slack signature in production.
 	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "production" && s.slackSigningSecret != "" {
+	slackSigningSecret := os.Getenv("SLACK_SIGNING_SECRET")
+	if appEnv == "production" && slackSigningSecret != "" {
 		signature := r.Header.Get("X-Slack-Signature")
 		timestamp := r.Header.Get("X-Slack-Request-Timestamp")
 		if signature == "" || timestamp == "" {
 			writeError(w, http.StatusBadRequest, "Missing Slack headers")
 			return
 		}
-		if !verifySlackSignature(s.slackSigningSecret, timestamp, body, signature) {
+		if !verifySlackSignature(slackSigningSecret, timestamp, body, signature) {
 			writeError(w, http.StatusUnauthorized, "Invalid signature")
 			return
 		}
 	}
 
+	// Slack interactive components may send URL-encoded payloads with a "payload" field.
+	// Since we consumed r.Body with io.ReadAll above, parse the raw body string.
+	payloadBytes := bodyBytes
+	payloadBody := body
+	if strings.HasPrefix(body, "payload=") {
+		values, err := url.ParseQuery(body)
+		if err == nil {
+			if pf := values.Get("payload"); pf != "" {
+				payloadBytes = []byte(pf)
+				payloadBody = pf
+			}
+		}
+	}
+
 	var payload SlackWebhookRequest
-	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		log.Printf("Failed to parse Slack payload: %v", err)
 		writeError(w, http.StatusBadRequest, "Invalid JSON")
 		return
@@ -607,6 +627,84 @@ func (s *ServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Request)
 		if eventType == "message" {
 			log.Printf("Slack message event received")
 		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	// Interactive callback (block_actions).
+	if payload.Type == "block_actions" {
+		if s.slack == nil {
+			log.Printf("Slack HITL provider not initialized, cannot handle callback")
+			writeError(w, http.StatusInternalServerError, "Slack integration not configured")
+			return
+		}
+		// Slack can send interactive payloads as direct JSON or a URL-encoded form field.
+		// We already handled the form-encoded case above with payloadBytes/payloadBody,
+		// so payloadBody is guaranteed to hold the JSON representation at this point.
+		callback, err := s.slack.ParseSlackPayload(payloadBody)
+		if err != nil {
+			log.Printf("Failed to parse Slack callback: %v", err)
+			writeError(w, http.StatusBadRequest, "Invalid callback payload")
+			return
+		}
+
+		ctx := r.Context()
+
+		// Determine action: approve:<jobID> or reject:<jobID>
+		parts := strings.SplitN(callback.ActionID, ":", 2)
+		if len(parts) != 2 {
+			writeError(w, http.StatusBadRequest, "Invalid action ID")
+			return
+		}
+		action := parts[0]
+		jobID := parts[1]
+
+		var newStatus domain.JobStatus
+		var hitlStatus string
+		switch action {
+		case "approve":
+			newStatus = domain.JobStatusCompleted
+			hitlStatus = "APPROVED"
+		case "reject":
+			newStatus = domain.JobStatusFailed
+			hitlStatus = "REJECTED"
+		default:
+			writeError(w, http.StatusBadRequest, "Unknown action")
+			return
+		}
+
+		// Update job status.
+		job, err := s.db.GetJob(ctx, jobID, "default")
+		if err != nil {
+			log.Printf("Failed to get job %s: %v", jobID, err)
+			writeError(w, http.StatusNotFound, "Job not found")
+			return
+		}
+		job.Status = newStatus
+		job.UpdatedAt = time.Now()
+		_ = s.db.UpsertJob(ctx, job)
+
+		// Update HITL request.
+		hitlReq, err := s.db.GetHITLRequest(ctx, "hitl-"+jobID)
+		if err == nil && hitlReq != nil {
+			hitlReq.Status = hitlStatus
+			t := time.Now()
+			hitlReq.RespondedAt = &t
+			_ = s.db.UpsertHITLRequest(ctx, hitlReq)
+		}
+
+		// Audit event.
+		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			Actor:      callback.UserID,
+			Action:     hitlStatus,
+			TargetType: "job",
+			TargetID:   jobID,
+			OldState:   string(domain.JobStatusAwaitingHITL),
+			NewState:   string(newStatus),
+			Timestamp:  time.Now(),
+		})
+
+		log.Printf("HITL decision for job %s: %s by user %s", jobID, action, callback.UserID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
@@ -640,7 +738,6 @@ func main() {
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	sarvamAPIKey := os.Getenv("SARVAM_API_KEY")
 	slackBotToken := os.Getenv("SLACK_BOT_TOKEN")
-	slackSigningSecret := os.Getenv("SLACK_SIGNING_SECRET")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -667,16 +764,36 @@ func main() {
 	}
 	log.Println("MinIO adapter initialized")
 
-	// Initialize Redis queue adapter.
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
+	// Initialize queue adapter (PubSub if emulator configured, else Redis).
+	var queueAdapter providers.QueueProvider
+	pubsubHost := os.Getenv("PUBSUB_EMULATOR_HOST")
+	if pubsubHost != "" {
+		projectID := os.Getenv("PUBSUB_PROJECT_ID")
+		if projectID == "" {
+			projectID = "opscore-local"
+		}
+		qa, err := queue.NewPubSubAdapter(ctx, projectID)
+		if err != nil {
+			log.Fatalf("Failed to initialize PubSub adapter: %v", err)
+		}
+		queueAdapter = qa
+		log.Printf("PubSub adapter initialized (emulator: %s)", pubsubHost)
+	} else {
+		if redisAddr == "" {
+			redisAddr = "localhost:6379"
+		}
+		qa, err := queue.NewRedisAdapter(redisAddr, redisPassword, 0)
+		if err != nil {
+			log.Fatalf("Failed to initialize Redis adapter: %v", err)
+		}
+		queueAdapter = qa
+		log.Println("Redis adapter initialized")
 	}
-	queueAdapter, err := queue.NewRedisAdapter(redisAddr, redisPassword, 0)
-	if err != nil {
-		log.Fatalf("Failed to initialize Redis adapter: %v", err)
+
+	// Close queue adapter if it supports Close() (RedisAdapter does, PubSubAdapter does not).
+	if closer, ok := queueAdapter.(interface{ Close() error }); ok {
+		defer closer.Close()
 	}
-	defer queueAdapter.Close()
-	log.Println("Redis adapter initialized")
 
 	// Initialize Sarvam AI adapters.
 	var ocrProvider providers.OCRProvider
@@ -686,35 +803,132 @@ func main() {
 		llmProvider = sarvam.NewLLMAdapter(sarvam.LLMConfig{APIKey: sarvamAPIKey})
 	}
 
+	// Initialize tracing provider.
+	var tracer providers.TracingProvider
+	langfuseBaseURL := os.Getenv("LANGFUSE_BASE_URL")
+	langfuseSecretKey := os.Getenv("LANGFUSE_SECRET_KEY")
+	langfusePublicKey := os.Getenv("LANGFUSE_PUBLIC_KEY")
+	if langfuseBaseURL != "" && langfuseSecretKey != "" && langfusePublicKey != "" {
+		tracer = telemetry.NewLangfuseProvider(langfuseBaseURL, langfuseSecretKey, langfusePublicKey)
+		log.Println("Langfuse tracing provider initialized")
+	} else {
+		tracer = &telemetry.NoopTracer{}
+		log.Println("Langfuse credentials not set — using no-op tracer")
+	}
+
 	// Initialize agents.
 	validator := domain.NewIndiaValidator()
-	docAgent := agents.NewDocumentAgent(storageAdapter, queueAdapter, dbAdapter, ocrProvider, validator)
-	vendAgent := agents.NewVendorAgent(dbAdapter, validator, llmProvider)
+	docAgent := agents.NewDocumentAgent(storageAdapter, queueAdapter, dbAdapter, ocrProvider, validator, tracer)
+	vendAgent := agents.NewVendorAgent(dbAdapter, validator, llmProvider, tracer)
 	compAgent := agents.NewComplianceAgent(dbAdapter, validator)
 
-	deps := &ServerDeps{
-		db:                 dbAdapter,
-		storage:            storageAdapter,
-		rq:                 queueAdapter,
-		docAgent:           docAgent,
-		vendAgent:          vendAgent,
-		compAgent:          compAgent,
-		slackSigningSecret: slackSigningSecret,
-		slackBotToken:      slackBotToken,
+	// Initialize Slack HITL provider.
+	slackChannel := os.Getenv("SLACK_HITL_CHANNEL")
+	var slackHITL *providers.SlackHITLProvider
+	if slackBotToken != "" {
+		slackHITL = providers.NewSlackHITLProvider(slackBotToken)
+		if slackChannel != "" {
+			slackHITL.WithChannel(slackChannel)
+		}
+		log.Println("Slack HITL provider initialized")
+	} else {
+		log.Println("SLACK_BOT_TOKEN not set — Slack HITL disabled")
 	}
+
+	// Create worker.
+	worker := &Worker{
+		db:        dbAdapter,
+		queue:     queueAdapter,
+		docAgent:  docAgent,
+		vendAgent: vendAgent,
+		slack:     slackHITL,
+		tracer:    tracer,
+	}
+
+	deps := &ServerDeps{
+		db:        dbAdapter,
+		storage:   storageAdapter,
+		rq:        queueAdapter,
+		docAgent:  docAgent,
+		vendAgent: vendAgent,
+		compAgent: compAgent,
+		slack:     slackHITL,
+		tracer:    tracer,
+		worker:    worker,
+	}
+
+	// Initialize rate limiter (reads RATE_LIMIT_RPS / RATE_LIMIT_BURST env vars; defaults: 10 rps, burst 20).
+	rl := ratelimit.NewFromEnv()
+	log.Println("Rate limiter initialized")
 
 	// Register routes.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", deps.healthHandler)
-	mux.HandleFunc("/upload", deps.uploadHandler)
-	mux.HandleFunc("/jobs/", deps.jobStatusHandler)
-	mux.HandleFunc("/vendors", deps.vendorHandler)
-	mux.HandleFunc("/vendors/", deps.vendorHandler)
+	mux.Handle("/upload", rl.Middleware(http.HandlerFunc(deps.uploadHandler)))
+	mux.Handle("/jobs/", rl.Middleware(http.HandlerFunc(deps.jobStatusHandler)))
+	mux.Handle("/vendors", rl.Middleware(http.HandlerFunc(deps.vendorHandler)))
+	mux.Handle("/vendors/", rl.Middleware(http.HandlerFunc(deps.vendorHandler)))
 	mux.HandleFunc("/slack/webhook", deps.slackWebhookHandler)
 
-	addr := fmt.Sprintf(":%s", port)
-	log.Printf("OpsCore server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Server error: %v", err)
+	// Start worker goroutines.
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	worker.Start(workerCtx)
+	log.Println("Queue worker started")
+
+	// Start compliance scheduler (hourly).
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-ticker.C:
+				log.Println("Compliance scheduler: starting periodic check")
+				compJob := &agents.ComplianceJob{
+					TenantID: "default",
+					JobID:    uuid.New().String(),
+					JobType:  "scrape",
+					Items:    []agents.ComplianceItem{},
+				}
+				result, err := compAgent.ProcessCompliance(workerCtx, compJob)
+				if err != nil {
+					log.Printf("Compliance check failed: %v", err)
+				} else {
+					log.Printf("Compliance check completed: %v", result)
+				}
+			}
+		}
+	}()
+	log.Println("Compliance scheduler started (hourly)")
+
+	// Start HTTP server with graceful shutdown.
+	server := &http.Server{Addr: fmt.Sprintf(":%s", port), Handler: mux}
+	go func() {
+		log.Printf("OpsCore server listening on %s", server.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal.
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-shutdownCtx.Done()
+
+	log.Println("Shutting down server...")
+
+	// Stop worker first.
+	workerCancel()
+	log.Println("Worker stopped")
+
+	// Shutdown HTTP server with timeout.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
 	}
+
+	log.Println("Server stopped gracefully")
 }

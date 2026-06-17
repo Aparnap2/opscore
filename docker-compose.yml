@@ -1,5 +1,5 @@
-# OpsCore v3.0 - Production-Like Local Development
-# Full stack: PostgreSQL, MinIO (S3), Redis, and the app server
+# OpsCore v3.0 - GCP Local Emulation
+# Full stack: PostgreSQL, MinIO (S3), Pub/Sub emulator, and the app server
 #
 # Usage:
 #   docker compose up -d                        # Start everything
@@ -11,103 +11,79 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: opscore-postgres
-    ports:
-      - "5432:5432"
+    ports: ["5432:5432"]
     environment:
       POSTGRES_DB: opscore
       POSTGRES_USER: opscore
       POSTGRES_PASSWORD: opscore
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
+    volumes: [postgres-data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U opscore -d opscore"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
-    networks:
-      - opscore-dev
+      start_period: 10s
+    networks: [opscore-net]
 
   minio:
     image: minio/minio:latest
     container_name: opscore-minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    ports: ["9000:9000", "9001:9001"]
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
-    volumes:
-      - minio-data:/data
+    volumes: [minio-data:/data]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
-    networks:
-      - opscore-dev
+      start_period: 10s
+    networks: [opscore-net]
 
-  redis:
-    image: redis:7-alpine
-    container_name: opscore-redis
-    ports:
-      - "6379:6379"
+  pubsub:
+    image: google/cloud-sdk:latest
+    container_name: opscore-pubsub
+    ports: ["8085:8085"]
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=opscore-local
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "curl", "-f", "http://localhost:8085/"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    networks:
-      - opscore-dev
+      start_period: 15s
+    networks: [opscore-net]
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: opscore-app
-    ports:
-      - "8080:8080"
+    ports: ["8080:8080"]
     environment:
-      # Database (PostgreSQL) — use Docker service name as host
       DATABASE_URL: postgres://opscore:opscore@postgres:5432/opscore?sslmode=disable
-      # S3-compatible Storage (MinIO) — use Docker service name as host
       S3_ENDPOINT: minio:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_USE_SSL: "false"
-      # Queue (Redis) — use Docker service name as host
-      REDIS_ADDR: redis:6379
-      REDIS_PASSWORD: ""
-      # Server
-      PORT: "8080"
-      APP_ENV: development
-      # AI Provider (set locally if needed)
+      PUBSUB_EMULATOR_HOST: pubsub:8085
+      PUBSUB_PROJECT_ID: opscore-local
       SARVAM_API_KEY: ""
-      # Slack HITL (set locally if needed)
       SLACK_BOT_TOKEN: ""
       SLACK_SIGNING_SECRET: ""
       SLACK_HITL_CHANNEL: ""
+      PORT: "8080"
+      APP_ENV: development
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - opscore-dev
+      pubsub:
+        condition: service_started
+    networks: [opscore-net]
 
 networks:
-  opscore-dev:
+  opscore-net:
     driver: bridge
 
 volumes:
