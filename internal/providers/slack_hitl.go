@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/slack-go/slack"
@@ -23,8 +24,9 @@ type SlackCallbackResult struct {
 
 // SlackHITLProvider implements HITLProvider for Slack
 type SlackHITLProvider struct {
-	client    *slack.Client
+	client     *slack.Client
 	webhookURL string
+	channel    string
 }
 
 // NewSlackHITLProvider creates a new Slack HITL provider
@@ -41,8 +43,17 @@ func (s *SlackHITLProvider) WithWebhookURL(url string) *SlackHITLProvider {
 	return s
 }
 
+// WithChannel sets the Slack channel for HITL messages
+func (s *SlackHITLProvider) WithChannel(channel string) *SlackHITLProvider {
+	s.channel = channel
+	return s
+}
+
 // SendApprovalRequest sends an approval request to Slack
 func (s *SlackHITLProvider) SendApprovalRequest(ctx context.Context, req *domain.HITLRequest) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("Slack HITL provider not initialized (missing SLACK_BOT_TOKEN)")
+	}
 	// Create Slack block kit message for approval using Message blocks
 	approveBtn := slack.NewButtonBlockElement(
 		fmt.Sprintf("approve:%s", req.JobID),
@@ -78,18 +89,40 @@ func (s *SlackHITLProvider) SendApprovalRequest(ctx context.Context, req *domain
 		},
 	}
 
-	// In production, send to a specific channel or user
-	// For now, just log the message
-	_ = msg
+	channel := s.channel
+	if channel == "" {
+		channel = os.Getenv("SLACK_HITL_CHANNEL")
+	}
+	if channel == "" {
+		channel = "C01ABCDEFG" // fallback for local dev
+	}
+
+	_, _, err := s.client.PostMessageContext(ctx, channel, slack.MsgOptionBlocks(msg.Blocks.BlockSet...))
+	if err != nil {
+		return fmt.Errorf("sending slack approval: %w", err)
+	}
 
 	return nil
 }
 
 // SendMessage sends a message to Slack
 func (s *SlackHITLProvider) SendMessage(ctx context.Context, tenantID, message string) error {
-	// In production, send to tenant-specific channel
-	// For now, log the message
-	fmt.Printf("[Slack] Tenant %s: %s\n", tenantID, message)
+	if s == nil || s.client == nil {
+		return fmt.Errorf("Slack HITL provider not initialized (missing SLACK_BOT_TOKEN)")
+	}
+	channel := s.channel
+	if channel == "" {
+		channel = os.Getenv("SLACK_HITL_CHANNEL")
+	}
+	if channel == "" {
+		channel = "C01ABCDEFG" // fallback for local dev
+	}
+
+	text := fmt.Sprintf("[Tenant %s] %s", tenantID, message)
+	_, _, err := s.client.PostMessageContext(ctx, channel, slack.MsgOptionText(text, false))
+	if err != nil {
+		return fmt.Errorf("sending slack message: %w", err)
+	}
 	return nil
 }
 
