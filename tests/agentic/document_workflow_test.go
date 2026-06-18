@@ -194,7 +194,7 @@ func TestDocumentAgent_HITLTrajectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get HITL request: %v", err)
 	}
-	if hitlReq.Status != "PENDING" {
+	if hitlReq.Status != domain.HITLStatusPending {
 		t.Errorf("expected HITL request status PENDING, got %s", hitlReq.Status)
 	}
 	if hitlReq.JobID != jobID {
@@ -412,7 +412,7 @@ func TestDocumentAgent_ValidationErrorTrajectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected HITL request for validation error case: %v", err)
 	}
-	if hitlReq.Status != "PENDING" {
+	if hitlReq.Status != domain.HITLStatusPending {
 		t.Errorf("expected HITL request status PENDING, got %s", hitlReq.Status)
 	}
 

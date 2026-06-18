@@ -258,14 +258,12 @@ func (w *pipelineWorker) processDocumentJob(ctx context.Context, body string) er
 			TenantID: job.TenantID,
 			JobID:    job.JobID,
 			Reason:   fmt.Sprintf("Document %s requires approval", job.FileName),
-			Status:   "PENDING",
+			Status:   domain.HITLStatusPending,
 			SentAt:   time.Now(),
 		}
 
 		if err := w.slack.SendApprovalRequest(ctx, hitlReq); err != nil {
 			// Slack failure is non-fatal in the worker
-			t, _ := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
-			_ = t // suppress unused
 		} else {
 			hitlReq.SentAt = time.Now()
 			_ = w.db.UpsertHITLRequest(ctx, hitlReq)
@@ -448,7 +446,7 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 		hitlReq = lastHITL
 	}
 	t.Logf("HITL request: id=%s, status=%s, reason=%s", hitlReq.ID, hitlReq.Status, hitlReq.Reason)
-	if hitlReq.Status != "PENDING" {
+	if hitlReq.Status != domain.HITLStatusPending {
 		t.Errorf("HITL request status = %s, want PENDING", hitlReq.Status)
 	}
 
@@ -458,7 +456,7 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 	t.Log("=== Step 4: Simulate human approval ===")
 
 	now := time.Now()
-	hitlReq.Status = "APPROVED"
+	hitlReq.Status = domain.HITLStatusApproved
 	hitlReq.RespondedAt = &now
 	hitlReq.Responder = "U_E2E_TESTER"
 	hitlReq.Decision = "approve"
@@ -472,7 +470,7 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHITLRequest after approval failed: %v", err)
 	}
-	if approvedHITL.Status != "APPROVED" {
+	if approvedHITL.Status != domain.HITLStatusApproved {
 		t.Errorf("HITL status after approval = %s, want APPROVED", approvedHITL.Status)
 	}
 	if approvedHITL.RespondedAt == nil {

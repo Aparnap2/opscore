@@ -3,14 +3,19 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 )
+
+// ErrVersionConflict is returned when an optimistic lock version check fails.
+var ErrVersionConflict = errors.New("version conflict: job was modified concurrently")
 
 // Adapter implements providers.DBProvider for PostgreSQL.
 type Adapter struct {
@@ -26,7 +31,7 @@ func NewAdapter(ctx context.Context, connStr string) (*Adapter, error) {
 
 	adapter := &Adapter{pool: pool}
 
-	if err := adapter.migrate(ctx); err != nil {
+	if err := RunMigrations(ctx, pool); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
@@ -43,135 +48,13 @@ func (a *Adapter) Close() {
 	a.pool.Close()
 }
 
-// migrate creates all required tables if they do not exist.
-func (a *Adapter) migrate(ctx context.Context) error {
-	tables := []string{
-		`CREATE TABLE IF NOT EXISTS jobs (
-			id TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			workflow_type TEXT,
-			status TEXT,
-			blob_url TEXT,
-			document_type TEXT,
-			confidence FLOAT,
-			extracted_data JSONB,
-			risk_flags TEXT[],
-			hitl_reason TEXT,
-			input JSONB,
-			output JSONB,
-			error TEXT,
-			parent_batch_id TEXT,
-			is_child_job BOOL DEFAULT FALSE,
-			trace_id TEXT,
-			correlation_id TEXT,
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			updated_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS vendors (
-			id TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			name TEXT,
-			gst_number TEXT,
-			pan_number TEXT,
-			ifsc_code TEXT,
-			bank_account TEXT,
-			risk_tier TEXT,
-			risk_score INT DEFAULT 0,
-			approved BOOL DEFAULT FALSE,
-			risk_flags TEXT[],
-			status TEXT,
-			last_transaction_at TIMESTAMPTZ,
-			trust_battery JSONB,
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			updated_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS documents (
-			id TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			job_id TEXT,
-			file_name TEXT,
-			storage_path TEXT,
-			type TEXT,
-			status TEXT,
-			content_hash TEXT,
-			extracted JSONB,
-			created_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS audit_events (
-			id TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			actor TEXT,
-			action TEXT,
-			target_type TEXT,
-			target_id TEXT,
-			old_state TEXT,
-			new_state TEXT,
-			trace_id TEXT,
-			correlation_id TEXT,
-			timestamp TIMESTAMPTZ DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS hitl_requests (
-			id TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			job_id TEXT,
-			reason TEXT,
-			status TEXT,
-			sent_at TIMESTAMPTZ,
-			responded_at TIMESTAMPTZ,
-			responder TEXT,
-			decision TEXT,
-			slack_ts TEXT,
-			created_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS compliance_chunks (
-			id TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			source_url TEXT,
-			source_hash TEXT,
-			content TEXT,
-			chunk_index INT,
-			severity TEXT,
-			document_type TEXT,
-			page_number INT,
-			created_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
-	}
-
-	for _, ddl := range tables {
-		if _, err := a.pool.Exec(ctx, ddl); err != nil {
-			return fmt.Errorf("executing migration: %w", err)
-		}
-	}
-
-	// Create indexes on tenant_id for all tables.
-	indexes := []string{
-		`CREATE INDEX IF NOT EXISTS idx_jobs_tenant_id ON jobs(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_vendors_tenant_id ON vendors(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_documents_tenant_id ON documents(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_id ON audit_events(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_hitl_requests_tenant_id ON hitl_requests(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_compliance_chunks_tenant_id ON compliance_chunks(tenant_id)`,
-		// Additional useful indexes
-		`CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status ON jobs(tenant_id, status)`,
-		`CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(tenant_id, content_hash)`,
-		`CREATE INDEX IF NOT EXISTS idx_hitl_requests_pending ON hitl_requests(tenant_id, status) WHERE status = 'pending'`,
-	}
-
-	for _, idx := range indexes {
-		if _, err := a.pool.Exec(ctx, idx); err != nil {
-			// Index may already exist; log but continue.
-			_ = err
-		}
-	}
-
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // Job methods
 // ---------------------------------------------------------------------------
 
-// UpsertJob inserts or updates a job record.
+// UpsertJob inserts or updates a job record with optimistic locking.
+// When job.Version > 0, it uses an UPDATE with a version check to prevent
+// concurrent overwrites. Returns ErrVersionConflict if the version does not match.
 func (a *Adapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 	inputJSON, _ := json.Marshal(job.Input)
 	outputJSON, _ := json.Marshal(job.Output)
@@ -183,14 +66,59 @@ func (a *Adapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 	}
 	job.UpdatedAt = now
 
+	if job.Version > 0 {
+		// Existing job: use UPDATE with optimistic locking.
+		query := `UPDATE jobs SET
+			tenant_id = $1, workflow_type = $2, status = $3,
+			blob_url = $4, document_type = $5, confidence = $6,
+			extracted_data = $7, risk_flags = $8, hitl_reason = $9,
+			input = $10, output = $11, error = $12,
+			parent_batch_id = $13, is_child_job = $14,
+			trace_id = $15, correlation_id = $16,
+			version = version + 1, updated_at = $17
+		WHERE id = $18 AND tenant_id = $19 AND version = $20
+		RETURNING version`
+
+		var newVersion int
+		err := a.pool.QueryRow(ctx, query,
+			job.TenantID, string(job.WorkflowType), string(job.Status),
+			job.BlobURL, job.DocumentType, job.Confidence,
+			extractedJSON, job.RiskFlags, job.HITLReason,
+			inputJSON, outputJSON, job.Error,
+			job.ParentBatchID, job.IsChildJob,
+			job.TraceID, job.CorrelationID,
+			job.UpdatedAt,
+			job.ID, job.TenantID, job.Version,
+		).Scan(&newVersion)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Check if the job exists at all (vs. version mismatch)
+				_, getErr := a.GetJob(ctx, job.ID, job.TenantID)
+				if getErr == nil {
+					// Job exists but version didn't match
+					return ErrVersionConflict
+				}
+				// Job doesn't exist — fall through to INSERT below
+			} else {
+				return fmt.Errorf("updating job: %w", err)
+			}
+		} else {
+			job.Version = newVersion
+			return nil
+		}
+	}
+
+	// New job or job not found: INSERT with ON CONFLICT fallback.
 	query := `INSERT INTO jobs (
 		id, tenant_id, workflow_type, status, blob_url, document_type, confidence,
 		extracted_data, risk_flags, hitl_reason, input, output, error,
-		parent_batch_id, is_child_job, trace_id, correlation_id, created_at, updated_at
+		parent_batch_id, is_child_job, trace_id, correlation_id,
+		created_at, updated_at, version
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
 		$8, $9, $10, $11, $12, $13,
-		$14, $15, $16, $17, $18, $19
+		$14, $15, $16, $17, $18,
+		$19, $20, $21
 	) ON CONFLICT (id) DO UPDATE SET
 		tenant_id = EXCLUDED.tenant_id,
 		workflow_type = EXCLUDED.workflow_type,
@@ -208,18 +136,19 @@ func (a *Adapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 		is_child_job = EXCLUDED.is_child_job,
 		trace_id = EXCLUDED.trace_id,
 		correlation_id = EXCLUDED.correlation_id,
-		updated_at = EXCLUDED.updated_at`
+		updated_at = EXCLUDED.updated_at,
+		version = EXCLUDED.version`
 
-	_, err := a.pool.Exec(ctx, query,
+	_, execErr := a.pool.Exec(ctx, query,
 		job.ID, job.TenantID, string(job.WorkflowType), string(job.Status),
 		job.BlobURL, job.DocumentType, job.Confidence,
 		extractedJSON, job.RiskFlags, job.HITLReason,
 		inputJSON, outputJSON, job.Error,
 		job.ParentBatchID, job.IsChildJob, job.TraceID, job.CorrelationID,
-		job.CreatedAt, job.UpdatedAt,
+		job.CreatedAt, job.UpdatedAt, job.Version,
 	)
-	if err != nil {
-		return fmt.Errorf("upserting job: %w", err)
+	if execErr != nil {
+		return fmt.Errorf("upserting job: %w", execErr)
 	}
 	return nil
 }
@@ -229,7 +158,8 @@ func (a *Adapter) GetJob(ctx context.Context, id, tenantID string) (*domain.Job,
 	query := `SELECT
 		id, tenant_id, workflow_type, status, blob_url, document_type, confidence,
 		extracted_data, risk_flags, hitl_reason, input, output, error,
-		parent_batch_id, is_child_job, trace_id, correlation_id, created_at, updated_at
+		parent_batch_id, is_child_job, trace_id, correlation_id,
+		created_at, updated_at, version
 	FROM jobs WHERE id = $1 AND tenant_id = $2`
 
 	row := a.pool.QueryRow(ctx, query, id, tenantID)
@@ -244,7 +174,7 @@ func (a *Adapter) GetJob(ctx context.Context, id, tenantID string) (*domain.Job,
 		&extractedJSON, &job.RiskFlags, &job.HITLReason,
 		&inputJSON, &outputJSON, &job.Error,
 		&job.ParentBatchID, &job.IsChildJob, &job.TraceID, &job.CorrelationID,
-		&job.CreatedAt, &job.UpdatedAt,
+		&job.CreatedAt, &job.UpdatedAt, &job.Version,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("getting job %s: %w", id, err)
@@ -271,7 +201,8 @@ func (a *Adapter) ListJobs(ctx context.Context, tenantID string, workflowType do
 	query := `SELECT
 		id, tenant_id, workflow_type, status, blob_url, document_type, confidence,
 		extracted_data, risk_flags, hitl_reason, input, output, error,
-		parent_batch_id, is_child_job, trace_id, correlation_id, created_at, updated_at
+		parent_batch_id, is_child_job, trace_id, correlation_id,
+		created_at, updated_at, version
 	FROM jobs WHERE tenant_id = $1`
 	args := []any{tenantID}
 	argIdx := 2
@@ -306,7 +237,7 @@ func (a *Adapter) ListJobs(ctx context.Context, tenantID string, workflowType do
 			&extractedJSON, &job.RiskFlags, &job.HITLReason,
 			&inputJSON, &outputJSON, &job.Error,
 			&job.ParentBatchID, &job.IsChildJob, &job.TraceID, &job.CorrelationID,
-			&job.CreatedAt, &job.UpdatedAt,
+			&job.CreatedAt, &job.UpdatedAt, &job.Version,
 		); err != nil {
 			return nil, fmt.Errorf("scanning job row: %w", err)
 		}

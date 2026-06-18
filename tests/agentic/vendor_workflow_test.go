@@ -423,7 +423,7 @@ func TestVendorAgent_HighRiskHITL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHITLRequest failed: %v", err)
 	}
-	if hitlReq.Status != "PENDING" {
+	if hitlReq.Status != domain.HITLStatusPending {
 		t.Errorf("HITL request status = %s, want PENDING", hitlReq.Status)
 	}
 	if hitlReq.TenantID != tenantID {

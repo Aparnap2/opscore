@@ -2,9 +2,11 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/aparna/opscore/internal/adapters/postgres"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 )
@@ -147,7 +149,7 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 		"needs_hitl":    needsHITL,
 	}
 
-	// Update job in database
+	// Update job in database with optimistic locking
 	dbJob := &domain.Job{
 		ID:           job.JobID,
 		TenantID:     job.TenantID,
@@ -161,23 +163,24 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 		dbJob.Status = domain.JobStatusAwaitingHITL
 	}
 
-	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
-		return nil, fmt.Errorf("updating job: %w", err)
+	// Get current version for optimistic locking
+	existingJob, getErr := a.db.GetJob(ctx, job.JobID, job.TenantID)
+	if getErr == nil {
+		dbJob.Version = existingJob.Version
 	}
 
-	// Create HITL request if needed
-	if needsHITL {
-		hitlReq := &domain.HITLRequest{
-			ID:       fmt.Sprintf("hitl-%s", job.JobID),
-			TenantID: job.TenantID,
-			JobID:    job.JobID,
-			Reason:   fmt.Sprintf("Document %s requires approval: confidence=%.2f, errors=%d", job.FileName, ocrResult.Confidence, len(validations.Errors)),
-			Status:   "PENDING",
-			SentAt:   time.Now(),
-		}
-
-		if err := a.db.UpsertHITLRequest(ctx, hitlReq); err != nil {
-			return nil, fmt.Errorf("creating HITL request: %w", err)
+	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
+		if errors.Is(err, postgres.ErrVersionConflict) {
+			// Retry once: re-GET, re-apply version, Upsert again
+			existingJob, getErr := a.db.GetJob(ctx, job.JobID, job.TenantID)
+			if getErr == nil {
+				dbJob.Version = existingJob.Version
+			}
+			if retryErr := a.db.UpsertJob(ctx, dbJob); retryErr != nil {
+				return nil, fmt.Errorf("updating job after conflict: %w", retryErr)
+			}
+		} else {
+			return nil, fmt.Errorf("updating job: %w", err)
 		}
 	}
 

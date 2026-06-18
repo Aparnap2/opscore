@@ -156,7 +156,7 @@ func (m *mockHandlerDB) ListPendingHITL(_ context.Context, tenantID string) ([]*
 	defer m.mu.Unlock()
 	var result []*domain.HITLRequest
 	for _, r := range m.hitlRequests {
-		if r.TenantID == tenantID && r.Status == "PENDING" {
+		if r.TenantID == tenantID && r.Status == domain.HITLStatusPending {
 			result = append(result, r)
 		}
 	}
@@ -722,14 +722,14 @@ func (s *testServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Requ
 		jobID := parts[1]
 
 		var newStatus domain.JobStatus
-		var hitlStatus string
+		var hitlStatus domain.HITLRequestStatus
 		switch action {
 		case "approve":
 			newStatus = domain.JobStatusCompleted
-			hitlStatus = "APPROVED"
+			hitlStatus = domain.HITLStatusApproved
 		case "reject":
 			newStatus = domain.JobStatusFailed
-			hitlStatus = "REJECTED"
+			hitlStatus = domain.HITLStatusRejected
 		default:
 			writeError(w, http.StatusBadRequest, "Unknown action")
 			return
@@ -756,7 +756,7 @@ func (s *testServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Requ
 		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
 			TenantID:   job.TenantID,
 			Actor:      callback.UserID,
-			Action:     hitlStatus,
+			Action:     string(hitlStatus),
 			TargetType: "job",
 			TargetID:   jobID,
 			OldState:   string(domain.JobStatusAwaitingHITL),
@@ -1263,7 +1263,7 @@ func TestSlackWebhook_BlockActions_Approve(t *testing.T) {
 		TenantID: "default",
 		JobID:    jobID,
 		Reason:   "Document requires approval",
-		Status:   "PENDING",
+		Status:   domain.HITLStatusPending,
 		SentAt:   now,
 	}
 	_ = srv.db.UpsertHITLRequest(nil, hitlReq)
@@ -1313,7 +1313,7 @@ func TestSlackWebhook_BlockActions_Approve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHITLRequest: %v", err)
 	}
-	if updatedHITL.Status != "APPROVED" {
+	if updatedHITL.Status != domain.HITLStatusApproved {
 		t.Errorf("HITL status = %s, want APPROVED", updatedHITL.Status)
 	}
 	if updatedHITL.RespondedAt == nil {
@@ -1330,7 +1330,7 @@ func TestSlackWebhook_BlockActions_Approve(t *testing.T) {
 	}
 	// The last event should be the HITL decision
 	lastEvent := events[len(events)-1]
-	if lastEvent.Action != "APPROVED" {
+	if lastEvent.Action != string(domain.HITLStatusApproved) {
 		t.Errorf("audit event action = %s, want APPROVED", lastEvent.Action)
 	}
 	if lastEvent.NewState != "COMPLETED" {
@@ -1365,7 +1365,7 @@ func TestSlackWebhook_BlockActions_Reject(t *testing.T) {
 		ID:       "hitl-" + jobID,
 		TenantID: "default",
 		JobID:    jobID,
-		Status:   "PENDING",
+		Status:   domain.HITLStatusPending,
 		SentAt:   now,
 	})
 
@@ -1402,7 +1402,7 @@ func TestSlackWebhook_BlockActions_Reject(t *testing.T) {
 	}
 
 	updatedHITL, _ := srv.db.GetHITLRequest(nil, "hitl-"+jobID)
-	if updatedHITL.Status != "REJECTED" {
+	if updatedHITL.Status != domain.HITLStatusRejected {
 		t.Errorf("HITL status = %s, want REJECTED", updatedHITL.Status)
 	}
 }

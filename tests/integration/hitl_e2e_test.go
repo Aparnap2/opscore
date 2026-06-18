@@ -159,7 +159,7 @@ func (m *e2eMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*doma
 	defer m.mu.Unlock()
 	var result []*domain.HITLRequest
 	for _, r := range m.hitlRequests {
-		if r.TenantID == tenantID && r.Status == "PENDING" {
+		if r.TenantID == tenantID && r.Status == domain.HITLStatusPending {
 			result = append(result, r)
 		}
 	}
@@ -390,7 +390,23 @@ func TestHITLE2E_FullFlow(t *testing.T) {
 	t.Log("✓ Job reached AWAITING_HITL status")
 
 	// -----------------------------------------------------------------------
-	// Step 4: Simulate Slack approve action
+	// Step 4: Create HITL request (simulating worker behavior)
+	// -----------------------------------------------------------------------
+	hitlReq := &domain.HITLRequest{
+		ID:       "hitl-" + uploadResp.JobID,
+		TenantID: "hitl-e2e",
+		JobID:    uploadResp.JobID,
+		Reason:   "Document low-quality-invoice.pdf requires approval | confidence=0.45",
+		Status:   domain.HITLStatusPending,
+		SentAt:   time.Now(),
+	}
+	if err := e2eDB.UpsertHITLRequest(context.Background(), hitlReq); err != nil {
+		t.Fatalf("Failed to create HITL request: %v", err)
+	}
+	t.Log("✓ HITL request created for approval")
+
+	// -----------------------------------------------------------------------
+	// Step 5: Simulate Slack approve action
 	// -----------------------------------------------------------------------
 	slackPayload := map[string]any{
 		"type": "block_actions",
@@ -418,7 +434,7 @@ func TestHITLE2E_FullFlow(t *testing.T) {
 	t.Log("✓ Slack approve action sent")
 
 	// -----------------------------------------------------------------------
-	// Step 5: Verify job is now COMPLETED
+	// Step 6: Verify job is now COMPLETED
 	// -----------------------------------------------------------------------
 	resp, err = ts.Client().Get(ts.URL + "/jobs/" + uploadResp.JobID)
 	if err != nil {
@@ -438,13 +454,13 @@ func TestHITLE2E_FullFlow(t *testing.T) {
 	t.Logf("✓ Job completed: id=%s, status=%s", finalStatus.ID, finalStatus.Status)
 
 	// -----------------------------------------------------------------------
-	// Step 6: Verify HITL request was approved
+	// Step 7: Verify HITL request was approved
 	// -----------------------------------------------------------------------
-	hitlReq, err := e2eDB.GetHITLRequest(nil, "hitl-"+uploadResp.JobID)
+	hitlReq, err = e2eDB.GetHITLRequest(nil, "hitl-"+uploadResp.JobID)
 	if err != nil {
 		t.Fatalf("GetHITLRequest failed: %v", err)
 	}
-	if hitlReq.Status != "APPROVED" {
+	if hitlReq.Status != domain.HITLStatusApproved {
 		t.Errorf("HITL request status = %s, want APPROVED", hitlReq.Status)
 	}
 	if hitlReq.RespondedAt == nil {
@@ -453,7 +469,7 @@ func TestHITLE2E_FullFlow(t *testing.T) {
 	t.Logf("✓ HITL request approved: id=%s", hitlReq.ID)
 
 	// -----------------------------------------------------------------------
-	// Step 7: Verify audit event was written
+	// Step 8: Verify audit event was written
 	// -----------------------------------------------------------------------
 	events, err := e2eDB.ListAuditEvents(nil, "hitl-e2e", "job", uploadResp.JobID, 10)
 	if err != nil {
@@ -706,14 +722,14 @@ func (s *e2eServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Reque
 		userID := cb.User.ID
 
 		var newStatus domain.JobStatus
-		var hitlStatus string
+		var hitlStatus domain.HITLRequestStatus
 		switch action {
 		case "approve":
 			newStatus = domain.JobStatusCompleted
-			hitlStatus = "APPROVED"
+			hitlStatus = domain.HITLStatusApproved
 		case "reject":
 			newStatus = domain.JobStatusFailed
-			hitlStatus = "REJECTED"
+			hitlStatus = domain.HITLStatusRejected
 		default:
 			writeE2EError(w, http.StatusBadRequest, "Unknown action")
 			return
@@ -740,7 +756,7 @@ func (s *e2eServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Reque
 		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
 			TenantID:   job.TenantID,
 			Actor:      userID,
-			Action:     hitlStatus,
+			Action:     string(hitlStatus),
 			TargetType: "job",
 			TargetID:   jobID,
 			OldState:   string(domain.JobStatusAwaitingHITL),

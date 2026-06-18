@@ -270,6 +270,16 @@ func (s *ServerDeps) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	blobURL, err := s.storage.Upload(ctx, ContainerDocuments, blobPath, bytes.NewReader(fileContent), ct)
 	if err != nil {
 		log.Printf("Blob upload failed: %v", err)
+		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   tenantID,
+			Actor:      "system",
+			Action:     "UPLOAD_FAILED",
+			TargetType: "job",
+			TargetID:   jobID,
+			NewState:   "FAILED",
+			Error:      err.Error(),
+			Timestamp:  now,
+		})
 		writeError(w, http.StatusInternalServerError, "Failed to upload file")
 		return
 	}
@@ -325,6 +335,16 @@ func (s *ServerDeps) uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := s.rq.Enqueue(ctx, QueueDocument, docJob); err != nil {
 		log.Printf("Failed to enqueue job: %v", err)
+		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   tenantID,
+			Actor:      "system",
+			Action:     "ENQUEUE_FAILED",
+			TargetType: "job",
+			TargetID:   jobID,
+			NewState:   "FAILED",
+			Error:      "Failed to enqueue for processing",
+			Timestamp:  now,
+		})
 		job.Status = domain.JobStatusFailed
 		job.Error = "Failed to enqueue for processing"
 		_ = s.db.UpsertJob(ctx, job)
@@ -476,6 +496,16 @@ func (s *ServerDeps) handleVendorCreate(w http.ResponseWriter, r *http.Request, 
 
 	if _, err := s.rq.Enqueue(ctx, QueueVendor, vendorJob); err != nil {
 		log.Printf("Failed to enqueue vendor job: %v", err)
+		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   tenantID,
+			Actor:      "system",
+			Action:     "ENQUEUE_FAILED",
+			TargetType: "vendor",
+			TargetID:   vendorID,
+			NewState:   "FAILED",
+			Error:      err.Error(),
+			Timestamp:  now,
+		})
 		writeJSON(w, http.StatusAccepted, VendorResponse{
 			VendorID: vendorID,
 			Status:   "created",
@@ -660,14 +690,14 @@ func (s *ServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Request)
 		jobID := parts[1]
 
 		var newStatus domain.JobStatus
-		var hitlStatus string
+		var hitlStatus domain.HITLRequestStatus
 		switch action {
 		case "approve":
 			newStatus = domain.JobStatusCompleted
-			hitlStatus = "APPROVED"
+			hitlStatus = domain.HITLStatusApproved
 		case "reject":
 			newStatus = domain.JobStatusFailed
-			hitlStatus = "REJECTED"
+			hitlStatus = domain.HITLStatusRejected
 		default:
 			writeError(w, http.StatusBadRequest, "Unknown action")
 			return
@@ -696,7 +726,7 @@ func (s *ServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Request)
 		// Audit event.
 		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
 			Actor:      callback.UserID,
-			Action:     hitlStatus,
+			Action:     string(hitlStatus),
 			TargetType: "job",
 			TargetID:   jobID,
 			OldState:   string(domain.JobStatusAwaitingHITL),
@@ -820,7 +850,7 @@ func main() {
 	validator := domain.NewIndiaValidator()
 	docAgent := agents.NewDocumentAgent(storageAdapter, queueAdapter, dbAdapter, ocrProvider, validator, tracer)
 	vendAgent := agents.NewVendorAgent(dbAdapter, validator, llmProvider, tracer)
-	compAgent := agents.NewComplianceAgent(dbAdapter, validator)
+	compAgent := agents.NewComplianceAgent(dbAdapter, validator, llmProvider)
 
 	// Initialize Slack HITL provider.
 	slackChannel := os.Getenv("SLACK_HITL_CHANNEL")

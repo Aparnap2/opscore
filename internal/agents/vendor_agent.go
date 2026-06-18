@@ -2,9 +2,11 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/aparna/opscore/internal/adapters/postgres"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 )
@@ -147,8 +149,10 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (result
 		return nil, fmt.Errorf("saving vendor: %w", err)
 	}
 
-	// Create job record
+	// Create job record with optimistic locking
 	span.SetAttribute("step", "upsert_job")
+	existingJob, getErr := a.db.GetJob(ctx, job.JobID, job.TenantID)
+
 	dbJob := &domain.Job{
 		ID:           job.JobID,
 		TenantID:     job.TenantID,
@@ -157,9 +161,23 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (result
 		UpdatedAt:    time.Now(),
 		Output:       result,
 	}
+	if getErr == nil {
+		dbJob.Version = existingJob.Version
+	}
 
 	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
-		return nil, fmt.Errorf("updating job: %w", err)
+		if errors.Is(err, postgres.ErrVersionConflict) {
+			// Retry once
+			existingJob, getErr := a.db.GetJob(ctx, job.JobID, job.TenantID)
+			if getErr == nil {
+				dbJob.Version = existingJob.Version
+			}
+			if retryErr := a.db.UpsertJob(ctx, dbJob); retryErr != nil {
+				return nil, fmt.Errorf("updating job after conflict: %w", retryErr)
+			}
+		} else {
+			return nil, fmt.Errorf("updating job: %w", err)
+		}
 	}
 
 	// Create HITL if needed
@@ -169,7 +187,7 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (result
 			TenantID: job.TenantID,
 			JobID:    job.JobID,
 			Reason:   fmt.Sprintf("Vendor %s requires approval: risk_score=%d", data.Name, riskScore),
-			Status:   "PENDING",
+			Status:   domain.HITLStatusPending,
 			SentAt:   time.Now(),
 		}
 

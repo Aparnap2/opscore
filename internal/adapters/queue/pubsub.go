@@ -198,13 +198,25 @@ func (r *realPubSubClient) Subscribe(ctx context.Context, subName, topicName str
 		return nil, fmt.Errorf("receiving messages: %w", err)
 	}
 
+	// Drain any remaining msg refs that were never explicitly acked/nacked
+	// (e.g. when the context was cancelled mid-receive). Nacking orphans
+	// prevents the memory leak and tells Pub/Sub to redeliver them.
+	r.mu.Lock()
+	for id, h := range r.msgRefs {
+		h.nack()
+		delete(r.msgRefs, id)
+	}
+	r.mu.Unlock()
+
 	return msgs, nil
 }
 
-// Ack looks up the stored message handle and calls Ack.
+// Ack looks up the stored message handle, deletes it from the refs map, and
+// calls Ack on the handle.
 func (r *realPubSubClient) Ack(ctx context.Context, ackID string) error {
 	r.mu.Lock()
 	h, ok := r.msgRefs[ackID]
+	delete(r.msgRefs, ackID)
 	r.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("message %s not found or already acknowledged", ackID)
@@ -213,10 +225,12 @@ func (r *realPubSubClient) Ack(ctx context.Context, ackID string) error {
 	return nil
 }
 
-// Nack looks up the stored message handle and calls Nack.
+// Nack looks up the stored message handle, deletes it from the refs map, and
+// calls Nack on the handle.
 func (r *realPubSubClient) Nack(ctx context.Context, ackID string) error {
 	r.mu.Lock()
 	h, ok := r.msgRefs[ackID]
+	delete(r.msgRefs, ackID)
 	r.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("message %s not found or already acknowledged", ackID)

@@ -30,6 +30,14 @@ const (
 	WorkflowCompliance        WorkflowType = "COMPLIANCE"
 )
 
+type HITLRequestStatus string
+
+const (
+	HITLStatusPending  HITLRequestStatus = "PENDING"
+	HITLStatusApproved HITLRequestStatus = "APPROVED"
+	HITLStatusRejected HITLRequestStatus = "REJECTED"
+)
+
 type JobStatus string
 
 const (
@@ -75,6 +83,7 @@ type AuditEvent struct {
 	OldState      string    `json:"old_state,omitempty"`
 	NewState      string    `json:"new_state,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
+	Error         string    `json:"error,omitempty"`
 	TraceID       string    `json:"trace_id,omitempty"`
 	CorrelationID string    `json:"correlation_id,omitempty"`
 }
@@ -101,6 +110,7 @@ type Job struct {
 	Extracted     interface{} `json:"extracted_data,omitempty"`
 	RiskFlags     []string    `json:"risk_flags,omitempty"`
 	HITLReason    string      `json:"hitl_reason,omitempty"`
+	Version       int         `json:"version"`
 }
 
 // ComplianceChunk represents a chunk of a document for compliance processing
@@ -151,14 +161,14 @@ type Document struct {
 }
 
 type HITLRequest struct {
-	ID           string     `json:"id"`
-	TenantID     string     `json:"tenant_id"`
-	JobID        string     `json:"job_id"`
-	Reason       string     `json:"reason"`
-	Status       string     `json:"status"`
-	SentAt       time.Time  `json:"sent_at"`
-	RespondedAt *time.Time `json:"responded_at,omitempty"`
-	Responder    string     `json:"responder,omitempty"`
-	Decision     string     `json:"decision,omitempty"`
-	SlackTS      string     `json:"slack_ts,omitempty"`
+	ID           string            `json:"id"`
+	TenantID     string            `json:"tenant_id"`
+	JobID        string            `json:"job_id"`
+	Reason       string            `json:"reason"`
+	Status       HITLRequestStatus `json:"status"`
+	SentAt       time.Time         `json:"sent_at"`
+	RespondedAt *time.Time         `json:"responded_at,omitempty"`
+	Responder    string            `json:"responder,omitempty"`
+	Decision     string            `json:"decision,omitempty"`
+	SlackTS      string            `json:"slack_ts,omitempty"`
 }

@@ -40,6 +40,11 @@ func newMockDB() *mockDB {
 func (m *mockDB) UpsertJob(_ context.Context, job *domain.Job) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	existing, exists := m.jobs[job.ID]
+	if exists {
+		// Simulate version tracking
+		job.Version = existing.Version + 1
+	}
 	m.jobs[job.ID] = job
 	return nil
 }
@@ -148,7 +153,7 @@ func (m *mockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.
 	defer m.mu.Unlock()
 	var result []*domain.HITLRequest
 	for _, r := range m.hitlRequests {
-		if r.TenantID == tenantID && r.Status == "PENDING" {
+		if r.TenantID == tenantID && r.Status == domain.HITLStatusPending {
 			result = append(result, r)
 		}
 	}
@@ -462,17 +467,7 @@ func TestDocumentAgent_ProcessDocument_HITL_LowConfidence(t *testing.T) {
 		t.Errorf("job status = %s, want %s", dbJob.Status, domain.JobStatusAwaitingHITL)
 	}
 
-	// Verify HITL request was created
-	hitlReq, err := db.GetHITLRequest(context.Background(), "hitl-"+job.JobID)
-	if err != nil {
-		t.Fatalf("GetHITLRequest() returned error: %v", err)
-	}
-	if hitlReq.Status != "PENDING" {
-		t.Errorf("HITL request status = %s, want PENDING", hitlReq.Status)
-	}
-	if hitlReq.JobID != job.JobID {
-		t.Errorf("HITL request JobID = %s, want %s", hitlReq.JobID, job.JobID)
-	}
+	// HITL request is now created by the worker, not the agent — no assertion here.
 }
 
 func TestDocumentAgent_ProcessDocument_HITL_ValidationErrors(t *testing.T) {
@@ -512,14 +507,7 @@ func TestDocumentAgent_ProcessDocument_HITL_ValidationErrors(t *testing.T) {
 		t.Errorf("job status = %s, want %s", dbJob.Status, domain.JobStatusAwaitingHITL)
 	}
 
-	// Verify HITL request created
-	hitlReq, err := db.GetHITLRequest(context.Background(), "hitl-"+job.JobID)
-	if err != nil {
-		t.Fatalf("GetHITLRequest() returned error: %v", err)
-	}
-	if hitlReq.Status != "PENDING" {
-		t.Errorf("HITL request status = %s, want PENDING", hitlReq.Status)
-	}
+	// HITL request is now created by the worker, not the agent — no assertion here.
 }
 
 func TestDocumentAgent_ProcessDocument_OCRError(t *testing.T) {
@@ -742,7 +730,7 @@ func TestVendorAgent_ProcessVendor_InvalidGST(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHITLRequest() returned error: %v", err)
 	}
-	if hitlReq.Status != "PENDING" {
+	if hitlReq.Status != domain.HITLStatusPending {
 		t.Errorf("HITL request status = %s, want PENDING", hitlReq.Status)
 	}
 	if hitlReq.JobID != job.JobID {

@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -108,26 +112,73 @@ func (p *LangfuseProvider) RecordError(ctx context.Context, err error, opts ...p
 }
 
 // sendRequest is a fire-and-forget helper that POSTs a JSON body to a
-// Langfuse API endpoint. Errors are silently discarded to match the
-// TracingProvider contract (void return).
+// Langfuse API endpoint. Errors are logged to match the TracingProvider
+// contract (void return).
 func (p *LangfuseProvider) sendRequest(ctx context.Context, path string, body map[string]any) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+path, bytes.NewReader(data))
-	if err != nil {
-		return
+	if err := p.retryHTTPPost(ctx, path, data); err != nil {
+		log.Printf("langfuse: request to %s failed: %v", path, err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", p.authHeader)
+}
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return
+// retryHTTPPost POSTs a JSON payload to the Langfuse API with exponential
+// backoff and jitter. It retries on HTTP 429 (rate limited), 502, 503, 504,
+// and network errors. Non-retryable 4xx errors are returned immediately.
+func (p *LangfuseProvider) retryHTTPPost(ctx context.Context, path string, data []byte) error {
+	delays := []time.Duration{100 * time.Millisecond, 300 * time.Millisecond, 900 * time.Millisecond}
+	maxAttempts := len(delays) + 1 // 1 initial + 3 retries = 4 total
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+path, bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("creating request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", p.authHeader)
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			// Network error — retry if attempts remain.
+			if attempt < maxAttempts {
+				time.Sleep(jitterDelay(delays[attempt-1]))
+				continue
+			}
+			return fmt.Errorf("network error after %d attempts: %w", attempt, err)
+		}
+
+		// Read and close body to allow connection reuse.
+		_, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		// Success.
+		if resp.StatusCode < 300 {
+			return nil
+		}
+
+		// Non-retryable client error (4xx except 429).
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+			return fmt.Errorf("non-retryable HTTP %d", resp.StatusCode)
+		}
+
+		// Retryable: 429, 502, 503, 504.
+		if attempt < maxAttempts {
+			time.Sleep(jitterDelay(delays[attempt-1]))
+			continue
+		}
+
+		return fmt.Errorf("max retries exceeded, last HTTP %d", resp.StatusCode)
 	}
-	_ = resp.Body.Close()
+
+	return nil // unreachable
+}
+
+// jitterDelay returns the given duration with a random ±50ms jitter.
+func jitterDelay(d time.Duration) time.Duration {
+	return d + time.Duration(rand.N(101)-50)*time.Millisecond
 }
 
 // ---------------------------------------------------------------------------

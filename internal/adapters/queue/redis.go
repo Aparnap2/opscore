@@ -12,7 +12,8 @@ import (
 	"github.com/aparna/opscore/internal/providers"
 )
 
-// RedisAdapter implements providers.QueueProvider using Redis lists.
+// RedisAdapter implements providers.QueueProvider using Redis lists
+// with a hash for O(1) message lookup on Delete/Poison.
 type RedisAdapter struct {
 	client *redis.Client
 }
@@ -46,7 +47,8 @@ func (r *RedisAdapter) Close() error {
 	return r.client.Close()
 }
 
-// Enqueue marshals the message to JSON and pushes it to the left side of the list.
+// Enqueue marshals the message to JSON, stores it in a hash for O(1) lookup,
+// and pushes only the message ID to the queue list.
 func (r *RedisAdapter) Enqueue(ctx context.Context, queueName string, message any) (string, error) {
 	body, err := json.Marshal(message)
 	if err != nil {
@@ -66,16 +68,29 @@ func (r *RedisAdapter) Enqueue(ctx context.Context, queueName string, message an
 		return "", fmt.Errorf("marshaling wrapper: %w", err)
 	}
 
-	if err := r.client.LPush(ctx, queueName, wrapperJSON).Err(); err != nil {
+	msgHashKey := queueName + ":messages"
+
+	// Store full message in hash for O(1) Delete/Poison lookup.
+	if err := r.client.HSet(ctx, msgHashKey, msgID, wrapperJSON).Err(); err != nil {
+		return "", fmt.Errorf("storing message in hash: %w", err)
+	}
+
+	// Push only the message ID to the queue list.
+	if err := r.client.LPush(ctx, queueName, msgID).Err(); err != nil {
 		return "", fmt.Errorf("enqueueing message: %w", err)
 	}
 
 	return msgID, nil
 }
 
-// Dequeue blocks and retrieves a message from the right side of the list.
+// Dequeue blocks and retrieves a message from the queue. Uses BRPopLPush to
+// atomically move the message ID from the main queue to a processing list,
+// providing lease semantics without losing messages on crash.
 func (r *RedisAdapter) Dequeue(ctx context.Context, queueName string) (*providers.QueueMessage, error) {
-	result, err := r.client.BRPop(ctx, 30*time.Second, queueName).Result()
+	processingKey := queueName + ":processing"
+	msgHashKey := queueName + ":messages"
+
+	result, err := r.client.BRPopLPush(ctx, queueName, processingKey, 30*time.Second).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
@@ -83,23 +98,39 @@ func (r *RedisAdapter) Dequeue(ctx context.Context, queueName string) (*provider
 		return nil, fmt.Errorf("dequeueing message: %w", err)
 	}
 
-	// BRPop returns [queueName, value].
-	if len(result) < 2 {
-		return nil, nil
+	// Handle old-format messages (full JSON wrappers) still in the queue
+	// during migration. These contain the full body inline.
+	var oldWrapper struct {
+		ID   string          `json:"id"`
+		Body json.RawMessage `json:"body"`
+	}
+	if json.Unmarshal([]byte(result), &oldWrapper) == nil && oldWrapper.ID != "" {
+		// Upgrade: store in hash for future O(1) operations.
+		_ = r.client.HSet(ctx, msgHashKey, oldWrapper.ID, result).Err()
+		return &providers.QueueMessage{
+			ID:   oldWrapper.ID,
+			Body: string(oldWrapper.Body),
+		}, nil
 	}
 
-	raw := result[1]
+	// New format — result is the message ID string.
+	msgID := result
+
+	wrapperJSON, err := r.client.HGet(ctx, msgHashKey, msgID).Result()
+	if err != nil {
+		if err == redis.Nil {
+			// Hash entry missing — return a minimal message with just the ID.
+			return &providers.QueueMessage{ID: msgID}, nil
+		}
+		return nil, fmt.Errorf("reading message from hash: %w", err)
+	}
 
 	var wrapper struct {
 		ID   string          `json:"id"`
 		Body json.RawMessage `json:"body"`
 	}
-	if err := json.Unmarshal([]byte(raw), &wrapper); err != nil {
-		// Legacy format — raw JSON without wrapper.
-		return &providers.QueueMessage{
-			ID:   "",
-			Body: raw,
-		}, nil
+	if err := json.Unmarshal([]byte(wrapperJSON), &wrapper); err != nil {
+		return &providers.QueueMessage{ID: msgID}, nil
 	}
 
 	return &providers.QueueMessage{
@@ -108,85 +139,73 @@ func (r *RedisAdapter) Dequeue(ctx context.Context, queueName string) (*provider
 	}, nil
 }
 
-// Delete removes a message from the queue by matching its wrapper content.
+// Delete acknowledges and removes a message. Uses LRem on the processing list
+// (typically small — only in-flight messages) for O(processing_size) instead
+// of scanning the entire queue. Falls back to the main queue if the message
+// was never dequeued.
 func (r *RedisAdapter) Delete(ctx context.Context, queueName, messageID string) error {
-	// Scan the list for a message with the matching ID and remove it.
-	// LRem removes all occurrences of the exact value, so we need to find it first.
-	// We use LRange + iterate to find and build the exact string to remove.
-	listLen, err := r.client.LLen(ctx, queueName).Result()
+	processingKey := queueName + ":processing"
+	msgHashKey := queueName + ":messages"
+
+	// Remove from processing list (in-flight messages — small set).
+	n, err := r.client.LRem(ctx, processingKey, 1, messageID).Result()
 	if err != nil {
-		return fmt.Errorf("getting list length: %w", err)
+		return fmt.Errorf("removing from processing list: %w", err)
 	}
 
-	// Read in chunks to avoid pulling the entire list into memory.
-	batchSize := int64(100)
-	for start := int64(0); start < listLen; start += batchSize {
-		end := start + batchSize - 1
-		if end >= listLen {
-			end = listLen - 1
-		}
-
-		items, err := r.client.LRange(ctx, queueName, start, end).Result()
+	// Also try the main queue (message may not have been dequeued yet).
+	if n == 0 {
+		n, err = r.client.LRem(ctx, queueName, 1, messageID).Result()
 		if err != nil {
-			return fmt.Errorf("reading list range: %w", err)
-		}
-
-		for _, item := range items {
-			var wrapper struct {
-				ID string `json:"id"`
-			}
-			if json.Unmarshal([]byte(item), &wrapper) == nil && wrapper.ID == messageID {
-				if err := r.client.LRem(ctx, queueName, 1, item).Err(); err != nil {
-					return fmt.Errorf("removing message %s: %w", messageID, err)
-				}
-				return nil
-			}
+			return fmt.Errorf("removing from queue: %w", err)
 		}
 	}
 
-	return fmt.Errorf("message %s not found in queue %s", messageID, queueName)
+	// Remove from hash regardless.
+	if err := r.client.HDel(ctx, msgHashKey, messageID).Err(); err != nil {
+		return fmt.Errorf("deleting message from hash: %w", err)
+	}
+
+	if n == 0 {
+		return fmt.Errorf("message %s not found in queue %s", messageID, queueName)
+	}
+	return nil
 }
 
-// Poison moves a message from the original queue to a poison queue.
+// Poison moves a message to the poison queue. O(1) — looks up the full message
+// from the hash, removes from the processing list by message ID, and pushes
+// the full JSON to the poison queue. The hash entry is cleaned up after the
+// poison queue receives the message so DLQ consumers have the full payload.
 func (r *RedisAdapter) Poison(ctx context.Context, queueName, messageID string) error {
 	poisonQueue := queueName + "-poison"
+	processingKey := queueName + ":processing"
+	msgHashKey := queueName + ":messages"
 
-	listLen, err := r.client.LLen(ctx, queueName).Result()
+	// Look up the full message from the hash.
+	wrapperJSON, err := r.client.HGet(ctx, msgHashKey, messageID).Result()
 	if err != nil {
-		return fmt.Errorf("getting list length: %w", err)
+		if err == redis.Nil {
+			return fmt.Errorf("message %s not found in queue %s", messageID, queueName)
+		}
+		return fmt.Errorf("reading message from hash: %w", err)
 	}
 
-	batchSize := int64(100)
-	for start := int64(0); start < listLen; start += batchSize {
-		end := start + batchSize - 1
-		if end >= listLen {
-			end = listLen - 1
-		}
-
-		items, err := r.client.LRange(ctx, queueName, start, end).Result()
-		if err != nil {
-			return fmt.Errorf("reading list range: %w", err)
-		}
-
-		for _, item := range items {
-			var wrapper struct {
-				ID string `json:"id"`
-			}
-			if json.Unmarshal([]byte(item), &wrapper) == nil && wrapper.ID == messageID {
-				// Remove from original queue.
-				if err := r.client.LRem(ctx, queueName, 1, item).Err(); err != nil {
-					return fmt.Errorf("removing message from queue: %w", err)
-				}
-				// Push to poison queue.
-				if err := r.client.LPush(ctx, poisonQueue, item).Err(); err != nil {
-					return fmt.Errorf("pushing to poison queue: %w", err)
-				}
-				return nil
-			}
-		}
+	// Remove from processing list.
+	if _, err := r.client.LRem(ctx, processingKey, 1, messageID).Result(); err != nil {
+		return fmt.Errorf("removing from processing list: %w", err)
 	}
 
-	return fmt.Errorf("message %s not found in queue %s", messageID, queueName)
+	// Push full message JSON to poison queue (so DLQ consumers have the body).
+	if err := r.client.LPush(ctx, poisonQueue, wrapperJSON).Err(); err != nil {
+		return fmt.Errorf("pushing to poison queue: %w", err)
+	}
+
+	// Remove from hash last — poison queue entry is independent.
+	if err := r.client.HDel(ctx, msgHashKey, messageID).Err(); err != nil {
+		return fmt.Errorf("deleting message from hash: %w", err)
+	}
+
+	return nil
 }
 
 // Compile-time interface check.

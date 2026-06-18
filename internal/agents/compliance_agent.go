@@ -48,9 +48,11 @@ type ComplianceItem struct {
 func NewComplianceAgent(
 	db providers.DBProvider,
 	validator *domain.IndiaValidator,
+	llm providers.LLMProvider,
 ) *ComplianceAgent {
 	return &ComplianceAgent{
 		db:         db,
+		llm:        llm,
 		validator:  validator,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
@@ -227,7 +229,7 @@ func (a *ComplianceAgent) CreateTicket(ctx context.Context, tenantID, title, des
 		TenantID: tenantID,
 		JobID:    title,
 		Reason:   description,
-		Status:   severity, // Use as severity marker
+		Status:   domain.HITLRequestStatus(severity), // Use as severity marker
 		SentAt:   time.Now(),
 	}
 
