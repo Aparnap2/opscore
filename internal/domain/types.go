@@ -127,6 +127,16 @@ type ComplianceChunk struct {
 	PageNumber   int       `json:"page_number,omitempty"`
 }
 
+type ComplianceRecord struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	SourceURL string    `json:"source_url"`
+	Gap       string    `json:"gap"`
+	Severity  string    `json:"severity"`
+	Score     float64   `json:"score"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Vendor struct {
 	TrustBattery TrustBattery `json:"trust_battery"`
 	UpdatedAt    time.Time    `json:"updated_at"`

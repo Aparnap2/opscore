@@ -751,6 +751,145 @@ func verifySlackSignature(signingSecret, timestamp, body, signature string) bool
 }
 
 // ---------------------------------------------------------------------------
+// Ops/Monitoring Endpoints
+// ---------------------------------------------------------------------------
+
+func (s *ServerDeps) statusSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	ctx := r.Context()
+
+	// Job counts by status
+	jobCounts := make(map[string]int)
+	statuses := []domain.JobStatus{
+		domain.JobStatusPending, domain.JobStatusQueued, domain.JobStatusProcessing,
+		domain.JobStatusCompleted, domain.JobStatusFailed, domain.JobStatusRetryableFailed,
+		domain.JobStatusAwaitingHITL,
+	}
+	for _, st := range statuses {
+		jobs, _ := s.db.ListJobs(ctx, tenantID, "", st)
+		jobCounts[string(st)] = len(jobs)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_counts": jobCounts,
+		"timestamp":  time.Now().UTC(),
+	})
+}
+
+func (s *ServerDeps) recentJobsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v := parseInt(l); v > 0 && v <= 50 {
+			limit = v
+		}
+	}
+	jobs, err := s.db.GetRecentJobs(r.Context(), tenantID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+}
+
+func (s *ServerDeps) jobAuditHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	jobID := extractJobIDFromPath(r.URL.Path, "/jobs/", "/audit")
+	if jobID == "" {
+		writeError(w, http.StatusBadRequest, "Missing job ID")
+		return
+	}
+	events, err := s.db.ListAuditEvents(r.Context(), tenantID, "job", jobID, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+func (s *ServerDeps) riskyVendorsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	vendors, err := s.db.GetRiskyVendors(r.Context(), tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"vendors": vendors})
+}
+
+func (s *ServerDeps) recentComplianceHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v := parseInt(l); v > 0 && v <= 50 {
+			limit = v
+		}
+	}
+	records, err := s.db.GetRecentCompliance(r.Context(), tenantID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"records": records})
+}
+
+func parseInt(s string) int {
+	var v int
+	fmt.Sscanf(s, "%d", &v)
+	return v
+}
+
+func extractJobIDFromPath(path, prefix, suffix string) string {
+	idx := len(prefix)
+	end := -1
+	for i := 0; i < len(path)-idx; i++ {
+		if path[idx+i] == '/' || path[idx+i] == '?' {
+			end = idx + i
+			break
+		}
+	}
+	if end == -1 {
+		end = len(path)
+	}
+	return path[idx:end]
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -893,11 +1032,20 @@ func main() {
 
 	// Register routes.
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", deps.healthHandler)
-	mux.Handle("/upload", rl.Middleware(http.HandlerFunc(deps.uploadHandler)))
-	mux.Handle("/jobs/", rl.Middleware(http.HandlerFunc(deps.jobStatusHandler)))
-	mux.Handle("/vendors", rl.Middleware(http.HandlerFunc(deps.vendorHandler)))
-	mux.Handle("/vendors/", rl.Middleware(http.HandlerFunc(deps.vendorHandler)))
+	mux.Handle("/health", rl.Middleware(http.HandlerFunc(deps.healthHandler)))
+	mux.Handle("/status/summary", rl.Middleware(http.HandlerFunc(deps.statusSummaryHandler)))
+	mux.Handle("/jobs/recent", rl.Middleware(http.HandlerFunc(deps.recentJobsHandler)))
+	mux.HandleFunc("/jobs/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/audit") {
+			deps.jobAuditHandler(w, r)
+			return
+		}
+		deps.jobStatusHandler(w, r)
+	})
+	mux.HandleFunc("/vendors/risky", deps.riskyVendorsHandler)
+	mux.HandleFunc("/vendors", deps.vendorHandler)
+	mux.HandleFunc("/vendors/", deps.vendorHandler)
+	mux.HandleFunc("/compliance/recent", deps.recentComplianceHandler)
 	mux.HandleFunc("/slack/webhook", deps.slackWebhookHandler)
 
 	// Start worker goroutines.

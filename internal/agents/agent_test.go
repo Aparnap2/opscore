@@ -188,6 +188,41 @@ func (m *mockDB) ListAuditEvents(_ context.Context, tenantID, targetType, target
 	return result, nil
 }
 
+func (m *mockDB) GetRecentJobs(_ context.Context, tenantID string, limit int) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.Job
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			result = append(result, j)
+		}
+	}
+	// Return up to limit jobs (no ordering in mock)
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (m *mockDB) GetRiskyVendors(_ context.Context, tenantID string) ([]*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.Vendor
+	for _, v := range m.vendors {
+		if v.TenantID == tenantID {
+			// Mock: consider vendors with risk < 30 or trust tier PROBATION/BLOCKED as risky
+			if v.RiskScore < 30 || v.TrustBattery.Tier == domain.TrustTierProbation || v.TrustBattery.Tier == domain.TrustTierBlocked {
+				result = append(result, v)
+			}
+		}
+	}
+	return result, nil
+}
+
+func (m *mockDB) GetRecentCompliance(_ context.Context, tenantID string, limit int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil // Not needed for mock tests
+}
+
 // mockStorage implements providers.StorageProvider.
 type mockStorage struct {
 	mu   sync.Mutex

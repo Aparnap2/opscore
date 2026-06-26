@@ -84,6 +84,10 @@ type DBProvider interface {
 	AppendAuditEvent(ctx context.Context, event *domain.AuditEvent) error
 	ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error)
 
+	// Ops endpoints
+	GetRecentJobs(ctx context.Context, tenantID string, limit int) ([]*domain.Job, error)
+	GetRiskyVendors(ctx context.Context, tenantID string) ([]*domain.Vendor, error)
+	GetRecentCompliance(ctx context.Context, tenantID string, limit int) ([]*domain.ComplianceRecord, error)
 }
 
 type HITLProvider interface {
