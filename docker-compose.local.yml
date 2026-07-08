@@ -1,0 +1,60 @@
+# OpsCore Local Development Stack
+# Lightweight: Postgres + MinIO + Redis (no PubSub emulator)
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up -d
+#   go run ./cmd/server                    # Start Go API on :8080
+#   streamlit run ops-ui/app.py            # Start admin UI on :8501
+#   curl http://localhost:8080/health
+#
+# Tear down:
+#   docker compose -f docker-compose.local.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opscore-local-postgres
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: opscore
+      POSTGRES_USER: opscore
+      POSTGRES_PASSWORD: opscore
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opscore -d opscore"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [opscore-local-net]
+
+  minio:
+    image: minio/minio:latest
+    container_name: opscore-local-minio
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [opscore-local-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: opscore-local-redis
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [opscore-local-net]
+
+networks:
+  opscore-local-net:
+    driver: bridge

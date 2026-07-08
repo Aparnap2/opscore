@@ -45,11 +45,19 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Run go vet
+        run: go vet ./...
+
       - name: Run unit tests
         run: go test ./internal/domain/... -v -race
 
       - name: Build check
         run: go build ./...
+
+      - name: Python syntax check
+        run: |
+          python3 -m py_compile ops-ui/app.py
+          python3 -m py_compile ops-ui/config.py
 
   # =======================================================================
   # Build and Push Docker Image

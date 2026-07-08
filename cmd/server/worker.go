@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/aparna/opscore/internal/adapters/postgres"
@@ -36,14 +36,14 @@ func (w *Worker) pollQueue(ctx context.Context, queueName string, handler func(c
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Worker stopped polling %s", queueName)
+			slog.Info("Worker stopped polling", "queue", queueName)
 			return
 		default:
 		}
 
 		msg, err := w.queue.Dequeue(ctx, queueName)
 		if err != nil {
-			log.Printf("Error dequeueing from %s: %v", queueName, err)
+			slog.Error("Error dequeueing", "queue", queueName, "err", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
@@ -52,7 +52,7 @@ func (w *Worker) pollQueue(ctx context.Context, queueName string, handler func(c
 			continue
 		}
 
-		log.Printf("Processing message from %s: id=%s", queueName, msg.ID)
+		slog.Info("Processing message", "queue", queueName, "id", msg.ID)
 
 		// Wrap handler in a closure with recover to prevent a single panic
 		// from crashing the entire server.
@@ -60,19 +60,19 @@ func (w *Worker) pollQueue(ctx context.Context, queueName string, handler func(c
 			defer func() {
 				if r := recover(); r != nil {
 					err = fmt.Errorf("PANIC in %s handler: %v", queueName, r)
-					log.Printf("Recovered from %s", err)
+					slog.Error("Recovered from error", "err", err)
 				}
 			}()
 			err = handler(ctx, msg.Body)
 		}()
 		if err != nil {
-			log.Printf("Handler failed for %s/%s: %v — sending to DLQ", queueName, msg.ID, err)
+			slog.Error("Handler failed — sending to DLQ", "queue", queueName, "id", msg.ID, "err", err)
 			if poisonErr := w.queue.Poison(ctx, queueName, msg.ID); poisonErr != nil {
-				log.Printf("Failed to poison %s/%s: %v", queueName, msg.ID, poisonErr)
+				slog.Error("Failed to poison", "queue", queueName, "id", msg.ID, "err", poisonErr)
 			}
 		} else {
 			if ackErr := w.queue.Delete(ctx, queueName, msg.ID); ackErr != nil {
-				log.Printf("Failed to ack %s/%s: %v", queueName, msg.ID, ackErr)
+				slog.Error("Failed to ack", "queue", queueName, "id", msg.ID, "err", ackErr)
 			}
 		}
 	}
@@ -111,7 +111,7 @@ func (w *Worker) processDocumentJob(ctx context.Context, body string) error {
 		UpdatedAt: time.Now(),
 	}
 	if err := upsertWithVersion(dbJob); err != nil {
-		log.Printf("Failed to update job %s to PROCESSING: %v", job.JobID, err)
+		slog.Error("Failed to update job to PROCESSING", "jobID", job.JobID, "err", err)
 	}
 
 	// Process the document
@@ -161,7 +161,7 @@ func (w *Worker) processDocumentJob(ctx context.Context, body string) error {
 		}
 
 		if err := w.slack.SendApprovalRequest(ctx, hitlReq); err != nil {
-			log.Printf("Failed to send Slack approval for %s: %v", job.JobID, err)
+			slog.Error("Failed to send Slack approval", "jobID", job.JobID, "err", err)
 		} else {
 			hitlReq.SentAt = time.Now()
 			_ = w.db.UpsertHITLRequest(ctx, hitlReq)
@@ -204,7 +204,7 @@ func (w *Worker) processVendorJob(ctx context.Context, body string) error {
 		UpdatedAt: time.Now(),
 	}
 	if err := upsertWithVersion(dbJob); err != nil {
-		log.Printf("Failed to update job %s to PROCESSING: %v", job.JobID, err)
+		slog.Error("Failed to update job to PROCESSING", "jobID", job.JobID, "err", err)
 	}
 
 	result, err := w.vendAgent.ProcessVendor(ctx, &job)
@@ -241,7 +241,7 @@ func (w *Worker) processVendorJob(ctx context.Context, body string) error {
 			SentAt:   time.Now(),
 		}
 		if err := w.slack.SendApprovalRequest(ctx, hitlReq); err != nil {
-			log.Printf("Failed to send Slack approval for %s: %v", job.JobID, err)
+			slog.Error("Failed to send Slack approval", "jobID", job.JobID, "err", err)
 		} else {
 			hitlReq.SentAt = time.Now()
 			_ = w.db.UpsertHITLRequest(ctx, hitlReq)

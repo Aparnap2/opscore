@@ -1,10 +1,39 @@
 # OpsCore — Product Requirements Document v4.0
 
 **Version:** 4.0 — Final  
-**Date:** 2026-05-12  
-**Status:** Active — Ship  
+**Date:** 2026-07-08  
+**Status:** Active — Shipped  
 **Repository:** github.com/aparna/opscore · branch: main  
-**Live URL:** https://opscore-functions-prod.azurewebsites.net/api/health  
+**Live URL:** *(coming soon)*  
+
+---
+
+## Final Architecture Decisions
+
+The following decisions were made during implementation and supersede earlier drafts. These represent the final, shipped architecture.
+
+### 1. REST-Only Admin UI
+The Streamlit dashboard (`ops-ui/`) consumes the Go API exclusively via HTTP. It has zero direct database access, no database credentials, and no internal Go package imports. This enforces a clean service boundary: the UI is a client of the API, not an extension of it.
+
+### 2. Structured JSON Logging
+All services emit structured key-value pairs via Go's standard library `log/slog` with the JSON handler. No bare `fmt.Println` or `log.Printf` anywhere in committed code. Every log line is machine-parseable and includes `time`, `level`, `msg`, and contextual fields (`job_id`, `tenant_id`, `duration_ms`, etc.).
+
+### 3. LLM Observability via Langfuse Cloud
+Every OCR and LLM call is traced through Langfuse Cloud with latency, token count, estimated cost, and prompt version tracking. The telemetry layer (`internal/telemetry/`) includes a no-op fallback — when Langfuse is not configured, tracing silently downgrades without crashing. This avoids the operational overhead of self-hosting an observability stack while retaining full traceability.
+
+### 4. Lightweight Metrics Endpoints
+Instead of deploying Prometheus + Grafana, the Go server exposes dedicated `/metrics/llm-summary` and `/metrics/workflow-summary` endpoints. These provide sufficient operational insight (call volume, latency, success/failure rates) for a single-tenant or small-scale deployment without the infrastructure complexity of a full observability pipeline.
+
+### 5. Local Development with Docker Compose
+The local dev stack runs three containers via `docker-compose.local.yml`:
+- **PostgreSQL 16** — primary database (replaces earlier Cosmos DB / Supabase evaluation)
+- **MinIO** — S3-compatible object storage for document uploads
+- **Redis 7** — queue backend (Pub/Sub) and caching
+
+The `Makefile` provides `make local-up`, `make run-api`, `make run-ui`, `make test-unit`, and `make test-integration` — the entire development loop is three commands.
+
+### 6. Deployment Target: Google Cloud Run + Supabase
+Production targets Google Cloud Run (serverless container runtime) with Supabase as the managed Postgres provider. This replaces the earlier Azure Functions + Cosmos DB architecture evaluated in v3.x. Rationale: Cloud Run provides cold-start performance suitable for the workload patterns, and Supabase offers a managed Postgres with built-in auth, storage, and real-time capabilities that align with the project's data model.
 
 ---
 

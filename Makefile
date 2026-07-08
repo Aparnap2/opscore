@@ -1,10 +1,21 @@
-.PHONY: docker-up docker-down test-unit test-integration test-all build lint fmt run
+.PHONY: local-up local-down run-api run-ui test-unit test-integration test-all build lint fmt run
 
-docker-up:
-	docker compose -f docker-compose.test.yml up -d
+# --- Local Development ---
 
-docker-down:
-	docker compose -f docker-compose.test.yml down
+local-up:
+	docker compose -f docker-compose.local.yml up -d
+	@echo "Postgres: localhost:5432 | MinIO: localhost:9000 | Redis: localhost:6379"
+
+local-down:
+	docker compose -f docker-compose.local.yml down -v
+
+run-api:
+	go run ./cmd/server/main.go
+
+run-ui:
+	cd ops-ui && streamlit run app.py
+
+# --- Testing ---
 
 test-unit:
 	go test ./internal/domain/... -v -race
@@ -15,6 +26,8 @@ test-integration:
 	docker compose -f docker-compose.test.yml down
 
 test-all: test-unit test-integration
+
+# --- Build & Tooling ---
 
 build:
 	go build ./...

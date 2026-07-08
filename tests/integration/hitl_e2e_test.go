@@ -194,6 +194,37 @@ func (m *e2eMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, tar
 	return result, nil
 }
 
+func (m *e2eMockDB) GetRecentJobs(_ context.Context, tenantID string, limit int) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.Job
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			result = append(result, j)
+		}
+	}
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (m *e2eMockDB) GetRiskyVendors(_ context.Context, tenantID string) ([]*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.Vendor
+	for _, v := range m.vendors {
+		if v.TenantID == tenantID {
+			result = append(result, v)
+		}
+	}
+	return result, nil
+}
+
+func (m *e2eMockDB) GetRecentCompliance(_ context.Context, tenantID string, limit int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
+
 // e2eMockStorage implements StorageProvider.
 type e2eMockStorage struct {
 	mu   sync.Mutex

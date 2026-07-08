@@ -8,6 +8,7 @@ bin/
 *.test
 *.out
 go.work
+server
 
 # Python (legacy from v1)
 __pycache__/
