@@ -24,6 +24,7 @@ import (
 	"github.com/aparna/opscore/internal/adapters/minio"
 	"github.com/aparna/opscore/internal/adapters/postgres"
 	"github.com/aparna/opscore/internal/adapters/queue"
+	"github.com/aparna/opscore/internal/adapters/openrouter"
 	"github.com/aparna/opscore/internal/adapters/sarvam"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
@@ -1068,12 +1069,17 @@ func main() {
 		defer closer.Close()
 	}
 
-	// Initialize Sarvam AI adapters.
+	// Initialize LLM adapters (Sarvam preferred, OpenRouter fallback).
 	var ocrProvider providers.OCRProvider
 	var llmProvider providers.LLMProvider
 	if sarvamAPIKey != "" {
 		ocrProvider = sarvam.NewOCRAdapter(sarvam.OCRConfig{APIKey: sarvamAPIKey})
 		llmProvider = sarvam.NewLLMAdapter(sarvam.LLMConfig{APIKey: sarvamAPIKey})
+	} else if openRouterAPIKey := os.Getenv("OPENROUTER_API_KEY"); openRouterAPIKey != "" {
+		slog.Info("Using OpenRouter LLM provider", "model", "tencent/hy3:free")
+		llmProvider = openrouter.NewAdapter(openrouter.Config{
+			APIKey: openRouterAPIKey,
+		})
 	}
 
 	// Initialize tracing provider.

@@ -65,8 +65,8 @@ func (s *callRecordingLLM) Reason(_ context.Context, prompt string) (string, err
 	return "default analysis", nil
 }
 
-func (s *callRecordingLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, error) {
-	return "", nil
+func (s *callRecordingLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) {
+	return "", nil, nil
 }
 
 // CallCount returns the number of Reason calls recorded.

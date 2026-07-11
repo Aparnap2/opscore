@@ -107,19 +107,19 @@ func (s *StubLLM) Reason(_ context.Context, prompt string) (string, error) {
 	return "analyzed", nil
 }
 
-func (s *StubLLM) Chat(_ context.Context, messages []providers.ChatMessage) (string, error) {
+func (s *StubLLM) Chat(_ context.Context, messages []providers.ChatMessage) (string, *json.RawMessage, error) {
 	for _, msg := range messages {
 		if strings.Contains(msg.Content, "trigger_error") {
-			return "", fmt.Errorf("LLM API unavailable: simulated failure")
+			return "", nil, fmt.Errorf("LLM API unavailable: simulated failure")
 		}
 		if strings.Contains(msg.Content, "approve") {
-			return "approved", nil
+			return "approved", nil, nil
 		}
 		if strings.Contains(msg.Content, "reject") {
-			return "rejected", nil
+			return "rejected", nil, nil
 		}
 	}
-	return "analyzed", nil
+	return "analyzed", nil, nil
 }
 
 // ---------------------------------------------------------------------------

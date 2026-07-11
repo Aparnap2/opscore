@@ -575,7 +575,7 @@ func TestStubLLM_ProviderContract(t *testing.T) {
 	})
 
 	t.Run("Chat_approve", func(t *testing.T) {
-		result, err := llm.Chat(ctx, []providers.ChatMessage{
+		result, _, err := llm.Chat(ctx, []providers.ChatMessage{
 			{Role: "user", Content: "please approve this"},
 		})
 		if err != nil {
@@ -587,7 +587,7 @@ func TestStubLLM_ProviderContract(t *testing.T) {
 	})
 
 	t.Run("Chat_trigger_error", func(t *testing.T) {
-		_, err := llm.Chat(ctx, []providers.ChatMessage{
+		_, _, err := llm.Chat(ctx, []providers.ChatMessage{
 			{Role: "user", Content: "trigger_error please"},
 		})
 		if err == nil {

@@ -30,12 +30,13 @@ type TableData struct {
 type LLMProvider interface {
 	ExtractFields(ctx context.Context, text string, schema any) (json.RawMessage, float64, error)
 	Reason(ctx context.Context, prompt string) (string, error)
-	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+	Chat(ctx context.Context, messages []ChatMessage) (string, *json.RawMessage, error)
 }
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string           `json:"role"`
+	Content          string           `json:"content"`
+	ReasoningDetails *json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 type StorageProvider interface {

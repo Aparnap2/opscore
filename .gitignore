@@ -36,6 +36,7 @@ wheels/
 .env
 .env.local
 .env.*.local
+config/live.env
 .venv
 venv/
 ENV/

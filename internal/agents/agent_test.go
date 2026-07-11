@@ -334,8 +334,8 @@ func (m *mockLLM) Reason(ctx context.Context, prompt string) (string, error) {
 	return m.reasonFunc(ctx, prompt)
 }
 
-func (m *mockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, error) {
-	return "mock chat response", nil
+func (m *mockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) {
+	return "mock chat response", nil, nil
 }
 
 // ---------------------------------------------------------------------------

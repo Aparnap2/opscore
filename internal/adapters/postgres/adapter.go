@@ -118,7 +118,7 @@ func (a *Adapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 		$1, $2, $3, $4, $5, $6, $7,
 		$8, $9, $10, $11, $12, $13,
 		$14, $15, $16, $17, $18,
-		$19, $20, $21
+		$19, $20
 	) ON CONFLICT (id) DO UPDATE SET
 		tenant_id = EXCLUDED.tenant_id,
 		workflow_type = EXCLUDED.workflow_type,
@@ -713,11 +713,11 @@ func (a *Adapter) GetRecentJobs(ctx context.Context, tenantID string, limit int)
 // GetRiskyVendors returns vendors with low trust score or risk.
 func (a *Adapter) GetRiskyVendors(ctx context.Context, tenantID string) ([]*domain.Vendor, error) {
 	query := `SELECT id, tenant_id, name, gst_number, pan_number, ifsc_code,
-		bank_account, risk_score, risk_tier, approved, trust_tier,
+		bank_account, risk_score, risk_tier, approved, trust_battery->>'tier' AS trust_tier,
 		created_at, updated_at, last_transaction_at
 	FROM vendors WHERE tenant_id = $1
-	AND (trust_tier IN ('PROBATION', 'NONE', 'BLOCKED') OR risk_score < 30)
-	ORDER BY trust_tier, risk_score`
+	AND (trust_battery->>'tier' IN ('PROBATION', 'NONE', 'BLOCKED') OR risk_score < 30)
+	ORDER BY trust_battery->>'tier', risk_score`
 
 	rows, err := a.pool.Query(ctx, query, tenantID)
 	if err != nil {
