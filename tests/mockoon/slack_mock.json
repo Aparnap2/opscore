@@ -1,0 +1,188 @@
+{
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "OpsCore Slack Mock",
+  "version": "2.0.0",
+  "schemas": [
+    {
+      "id": "slack-api",
+      "name": "Slack Web API",
+      "schema": "https://api.slack.com/schemas/response"
+    }
+  ],
+  "servers": [
+    {
+      "uuid": "local",
+      "name": "Local Mock Server",
+      "url": "http://localhost:3100"
+    }
+  ],
+  "environments": [
+    {
+      "uuid": "local",
+      "name": "Local",
+      "isCurrent": true,
+      "server": "local",
+      "responses": []
+    }
+  ],
+  "api": [
+    {
+      "uuid": "health-check",
+      "name": "Health Check",
+      "method": "GET",
+      "path": "/health",
+      "links": [],
+      "folders": [],
+      "enabled": true,
+      "response": {
+        "uuid": "health-response",
+        "status": 200,
+        "body": "{\"status\":\"ok\"}",
+        "latency": 0,
+        "headerRules": [],
+        "bodyType": "json",
+        "bodyRaw": "{\n  \"status\": \"ok\"\n}",
+        "schema": {
+          "id": "health-schema",
+          "name": "Health Response"
+        }
+      },
+      "documentation": "Health check endpoint for mockoon container"
+    },
+    {
+      "uuid": "chat-post-message",
+      "name": "Chat PostMessage",
+      "method": "POST",
+      "path": "/api/chat.postMessage",
+      "links": [],
+      "folders": [],
+      "enabled": true,
+      "response": {
+        "uuid": "postmessage-response",
+        "status": 200,
+        "body": "{\"ok\":true,\"ts\":\"1234567890.123456\",\"channel\":\"C012345678\",\"message\":{\"type\":\"message\",\"subtype\":\"bot_message\",\"text\":\"OpsCore notification\",\"ts\":\"1234567890.123456\",\"username\":\"OpsCore\",\"bot_id\":\"B012345678\"}}",
+        "latency": 0,
+        "headerRules": [
+          {
+            "uuid": "content-type-json",
+            "key": "Content-Type",
+            "value": "application/json; charset=utf-8",
+            "isRegex": false
+          },
+          {
+            "uuid": "x-rate-limit",
+            "key": "X-RateLimit-Limit",
+            "value": "100",
+            "isRegex": false
+          }
+        ],
+        "bodyType": "json",
+        "bodyRaw": "{\n  \"ok\": true,\n  \"ts\": \"1234567890.123456\",\n  \"channel\": \"C012345678\",\n  \"message\": {\n    \"type\": \"message\",\n    \"subtype\": \"bot_message\",\n    \"text\": \"OpsCore notification\",\n    \"ts\": \"1234567890.123456\",\n    \"username\": \"OpsCore\",\n    \"bot_id\": \"B012345678\"\n  }\n}",
+        "schema": {
+          "id": "chat-postmessage-schema",
+          "name": "chat.postMessage Response"
+        }
+      },
+      "documentation": "Mock for Slack chat.postMessage API - posts a message to a channel. https://api.slack.com/methods/chat.postMessage",
+      "rules": [
+        {
+          "uuid": "channel-required",
+          "priority": 1,
+          "function": "body",
+          "expression": {
+            "operator": "json_pattern",
+            "key": "//channel",
+            "value": ".+",
+            "matchType": "regex"
+          },
+          "disabled": false
+        },
+        {
+          "uuid": "text-required",
+          "priority": 2,
+          "function": "body",
+          "expression": {
+            "operator": "json_pattern",
+            "key": "//text",
+            "value": ".+",
+            "matchType": "regex"
+          },
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "uuid": "views-open",
+      "name": "Views Open",
+      "method": "POST",
+      "path": "/api/views.open",
+      "links": [],
+      "folders": [],
+      "enabled": true,
+      "response": {
+        "uuid": "views-open-response",
+        "status": 200,
+        "body": "{\"ok\":true,\"view\":{\"id\":\"V012345678\",\"type\":\"modal\",\"title\":{\"type\":\"plain_text\",\"text\":\"Approval Required\"},\"blocks\":[],\"close\":{\"type\":\"plain_text\",\"text\":\"Cancel\"},\"submit\":{\"type\":\"plain_text\",\"text\":\"Approve\"}}}",
+        "latency": 0,
+        "headerRules": [
+          {
+            "uuid": "content-type-json-2",
+            "key": "Content-Type",
+            "value": "application/json; charset=utf-8",
+            "isRegex": false
+          },
+          {
+            "uuid": "x-rate-limit-2",
+            "key": "X-RateLimit-Limit",
+            "value": "100",
+            "isRegex": false
+          }
+        ],
+        "bodyType": "json",
+        "bodyRaw": "{\n  \"ok\": true,\n  \"view\": {\n    \"id\": \"V012345678\",\n    \"type\": \"modal\",\n    \"title\": {\n      \"type\": \"plain_text\",\n      \"text\": \"Approval Required\"\n    },\n    \"blocks\": [],\n    \"close\": {\n      \"type\": \"plain_text\",\n      \"text\": \"Cancel\"\n    },\n    \"submit\": {\n      \"type\": \"plain_text\",\n      \"text\": \"Approve\"\n    }\n  }\n}",
+        "schema": {
+          "id": "views-open-schema",
+          "name": "views.open Response"
+        }
+      },
+      "documentation": "Mock for Slack views.open API - opens a modal. https://api.slack.com/methods/views.open",
+      "rules": [
+        {
+          "uuid": "view-required",
+          "priority": 1,
+          "function": "body",
+          "expression": {
+            "operator": "json_pattern",
+            "key": "//view",
+            "value": ".+",
+            "matchType": "regex"
+          },
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "uuid": "slack-actions",
+      "name": "Interactive Endpoint",
+      "method": "POST",
+      "path": "/slack/actions",
+      "links": [],
+      "folders": [],
+      "enabled": true,
+      "response": {
+        "uuid": "actions-response",
+        "status": 200,
+        "body": "",
+        "latency": 0,
+        "headerRules": [],
+        "bodyType": "text",
+        "bodyRaw": "",
+        "schema": {
+          "id": "slack-actions-schema",
+          "name": "Interactive Response"
+        }
+      },
+      "documentation": "Mock for Slack interactive endpoint (buttons, menus). Always returns 200 OK. https://api.slack.com/interactivity/handling"
+    }
+  ]
+}

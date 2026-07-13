@@ -1,0 +1,39 @@
+# OpsCore v2.0 - GolangCI-Lint Configuration
+
+run:
+  timeout: 5m
+  tests: false
+  modules: download
+
+go: "1.25"
+
+linters:
+  disable-all: true
+  enable:
+    - deadcode
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  govet:
+    enable-all: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+run-paths:
+  - ./internal/...
+  - ./cmd/...
+  - ./tests/...
