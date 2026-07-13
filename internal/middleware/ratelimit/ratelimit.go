@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"golang.org/x/time/rate"
+
+	"github.com/aparna/opscore/internal/middleware/tenant"
 )
 
 // RateLimiter provides token bucket rate limiting per tenant
@@ -48,9 +50,10 @@ func (rl *RateLimiter) Allow(tenantID string) bool {
 // Middleware returns an HTTP middleware that enforces rate limiting
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tenantID := r.Header.Get("X-Tenant-ID")
-		if tenantID == "" {
-			tenantID = "default"
+		t := tenant.FromContext(r.Context())
+		tenantID := "default"
+		if t != nil {
+			tenantID = t.ID
 		}
 		if !rl.Allow(tenantID) {
 			w.Header().Set("Retry-After", "1")

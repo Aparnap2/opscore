@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aparna/opscore/internal/domain"
@@ -16,6 +17,38 @@ import (
 
 // ErrVersionConflict is returned when an optimistic lock version check fails.
 var ErrVersionConflict = errors.New("version conflict: job was modified concurrently")
+
+// Context key for storing a transaction in the context.
+type txContextKey string
+
+const txKey txContextKey = "pgx_tx"
+
+// WithTx returns a context with the given transaction attached.
+func WithTx(ctx context.Context, tx pgx.Tx) context.Context {
+	return context.WithValue(ctx, txKey, tx)
+}
+
+// getTx returns the transaction from context, or nil if not set.
+func getTx(ctx context.Context) pgx.Tx {
+	tx, _ := ctx.Value(txKey).(pgx.Tx)
+	return tx
+}
+
+// queryExecer is satisfied by both pgx.Tx and pgxpool.Pool, allowing
+// transparent transaction-aware query execution.
+type queryExecer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// getExec returns the transaction from context if available, else the pool.
+func (a *Adapter) getExec(ctx context.Context) queryExecer {
+	if tx := getTx(ctx); tx != nil {
+		return tx
+	}
+	return a.pool
+}
 
 // Adapter implements providers.DBProvider for PostgreSQL.
 type Adapter struct {
@@ -80,7 +113,7 @@ func (a *Adapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 		RETURNING version`
 
 		var newVersion int
-		err := a.pool.QueryRow(ctx, query,
+		err := a.getExec(ctx).QueryRow(ctx, query,
 			job.TenantID, string(job.WorkflowType), string(job.Status),
 			job.BlobURL, job.DocumentType, job.Confidence,
 			extractedJSON, job.RiskFlags, job.HITLReason,
@@ -139,7 +172,7 @@ func (a *Adapter) UpsertJob(ctx context.Context, job *domain.Job) error {
 		updated_at = EXCLUDED.updated_at,
 		version = EXCLUDED.version`
 
-	_, execErr := a.pool.Exec(ctx, query,
+	_, execErr := a.getExec(ctx).Exec(ctx, query,
 		job.ID, job.TenantID, string(job.WorkflowType), string(job.Status),
 		job.BlobURL, job.DocumentType, job.Confidence,
 		extractedJSON, job.RiskFlags, job.HITLReason,
@@ -162,7 +195,7 @@ func (a *Adapter) GetJob(ctx context.Context, id, tenantID string) (*domain.Job,
 		created_at, updated_at, version
 	FROM jobs WHERE id = $1 AND tenant_id = $2`
 
-	row := a.pool.QueryRow(ctx, query, id, tenantID)
+	row := a.getExec(ctx).QueryRow(ctx, query, id, tenantID)
 
 	job := &domain.Job{}
 	var workflowType, status string
@@ -219,7 +252,7 @@ func (a *Adapter) ListJobs(ctx context.Context, tenantID string, workflowType do
 	}
 	query += " ORDER BY created_at DESC"
 
-	rows, err := a.pool.Query(ctx, query, args...)
+	rows, err := a.getExec(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing jobs: %w", err)
 	}
@@ -298,7 +331,7 @@ func (a *Adapter) UpsertVendor(ctx context.Context, vendor *domain.Vendor) error
 		trust_battery = EXCLUDED.trust_battery,
 		updated_at = EXCLUDED.updated_at`
 
-	_, err := a.pool.Exec(ctx, query,
+	_, err := a.getExec(ctx).Exec(ctx, query,
 		vendor.ID, vendor.TenantID, vendor.Name,
 		vendor.GSTNumber, vendor.PANNumber, vendor.IFSCCode, vendor.BankAccount,
 		string(vendor.RiskTier), vendor.RiskScore, vendor.Approved,
@@ -311,15 +344,15 @@ func (a *Adapter) UpsertVendor(ctx context.Context, vendor *domain.Vendor) error
 	return nil
 }
 
-// GetVendor retrieves a vendor by id.
-func (a *Adapter) GetVendor(ctx context.Context, id string) (*domain.Vendor, error) {
+// GetVendor retrieves a vendor by id and tenant_id.
+func (a *Adapter) GetVendor(ctx context.Context, id, tenantID string) (*domain.Vendor, error) {
 	query := `SELECT
 		id, tenant_id, name, gst_number, pan_number, ifsc_code, bank_account,
 		risk_tier, risk_score, approved, risk_flags, status, last_transaction_at,
 		trust_battery, created_at, updated_at
-	FROM vendors WHERE id = $1`
+	FROM vendors WHERE id = $1 AND tenant_id = $2`
 
-	row := a.pool.QueryRow(ctx, query, id)
+	row := a.getExec(ctx).QueryRow(ctx, query, id, tenantID)
 
 	v := &domain.Vendor{}
 	var riskTier string
@@ -352,7 +385,7 @@ func (a *Adapter) ListVendors(ctx context.Context, tenantID string) ([]*domain.V
 		trust_battery, created_at, updated_at
 	FROM vendors WHERE tenant_id = $1 ORDER BY created_at DESC`
 
-	rows, err := a.pool.Query(ctx, query, tenantID)
+	rows, err := a.getExec(ctx).Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("listing vendors: %w", err)
 	}
@@ -413,7 +446,7 @@ func (a *Adapter) UpsertDocument(ctx context.Context, doc *domain.Document) erro
 		content_hash = EXCLUDED.content_hash,
 		extracted = EXCLUDED.extracted`
 
-	_, err := a.pool.Exec(ctx, query,
+	_, err := a.getExec(ctx).Exec(ctx, query,
 		doc.ID, doc.TenantID, doc.JobID, doc.FileName, doc.StoragePath,
 		doc.Type, doc.Status, doc.ContentHash, extractedJSON, doc.CreatedAt,
 	)
@@ -423,13 +456,13 @@ func (a *Adapter) UpsertDocument(ctx context.Context, doc *domain.Document) erro
 	return nil
 }
 
-// GetDocument retrieves a document by id.
-func (a *Adapter) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
+// GetDocument retrieves a document by id and tenant_id.
+func (a *Adapter) GetDocument(ctx context.Context, id, tenantID string) (*domain.Document, error) {
 	query := `SELECT id, tenant_id, job_id, file_name, storage_path, type, status,
 		content_hash, extracted, created_at
-	FROM documents WHERE id = $1`
+	FROM documents WHERE id = $1 AND tenant_id = $2`
 
-	row := a.pool.QueryRow(ctx, query, id)
+	row := a.getExec(ctx).QueryRow(ctx, query, id, tenantID)
 
 	doc := &domain.Document{}
 	var extractedJSON []byte
@@ -457,7 +490,7 @@ func (a *Adapter) FindBySHA256(ctx context.Context, tenantID, contentHash string
 	FROM documents WHERE tenant_id = $1 AND content_hash = $2
 	LIMIT 1`
 
-	row := a.pool.QueryRow(ctx, query, tenantID, contentHash)
+	row := a.getExec(ctx).QueryRow(ctx, query, tenantID, contentHash)
 
 	doc := &domain.Document{}
 	var extractedJSON []byte
@@ -505,7 +538,7 @@ func (a *Adapter) UpsertHITLRequest(ctx context.Context, req *domain.HITLRequest
 		decision = EXCLUDED.decision,
 		slack_ts = EXCLUDED.slack_ts`
 
-	_, err := a.pool.Exec(ctx, query,
+	_, err := a.getExec(ctx).Exec(ctx, query,
 		req.ID, req.TenantID, req.JobID, req.Reason, req.Status,
 		req.SentAt, req.RespondedAt, req.Responder, req.Decision, req.SlackTS,
 	)
@@ -515,13 +548,13 @@ func (a *Adapter) UpsertHITLRequest(ctx context.Context, req *domain.HITLRequest
 	return nil
 }
 
-// GetHITLRequest retrieves a HITL request by id.
-func (a *Adapter) GetHITLRequest(ctx context.Context, id string) (*domain.HITLRequest, error) {
+// GetHITLRequest retrieves a HITL request by id and tenant_id.
+func (a *Adapter) GetHITLRequest(ctx context.Context, id, tenantID string) (*domain.HITLRequest, error) {
 	query := `SELECT id, tenant_id, job_id, reason, status, sent_at, responded_at,
 		responder, decision, slack_ts
-	FROM hitl_requests WHERE id = $1`
+	FROM hitl_requests WHERE id = $1 AND tenant_id = $2`
 
-	row := a.pool.QueryRow(ctx, query, id)
+	row := a.getExec(ctx).QueryRow(ctx, query, id, tenantID)
 
 	req := &domain.HITLRequest{}
 	err := row.Scan(
@@ -534,6 +567,52 @@ func (a *Adapter) GetHITLRequest(ctx context.Context, id string) (*domain.HITLRe
 	return req, nil
 }
 
+// ListHITLRequests retrieves HITL requests for a tenant with optional status filtering and pagination.
+func (a *Adapter) ListHITLRequests(ctx context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `SELECT id, tenant_id, job_id, reason, status, sent_at, responded_at,
+		responder, decision, slack_ts
+	FROM hitl_requests WHERE tenant_id = $1`
+	args := []any{tenantID}
+	argIdx := 2
+
+	if status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, status)
+		argIdx++
+	}
+
+	query += " ORDER BY sent_at DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := a.getExec(ctx).Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing HITL requests: %w", err)
+	}
+	defer rows.Close()
+
+	var requests []*domain.HITLRequest
+	for rows.Next() {
+		req := &domain.HITLRequest{}
+		if err := rows.Scan(
+			&req.ID, &req.TenantID, &req.JobID, &req.Reason, &req.Status,
+			&req.SentAt, &req.RespondedAt, &req.Responder, &req.Decision, &req.SlackTS,
+		); err != nil {
+			return nil, fmt.Errorf("scanning HITL row: %w", err)
+		}
+		requests = append(requests, req)
+	}
+
+	return requests, nil
+}
+
 // ListPendingHITL retrieves all pending HITL requests for a tenant.
 func (a *Adapter) ListPendingHITL(ctx context.Context, tenantID string) ([]*domain.HITLRequest, error) {
 	query := `SELECT id, tenant_id, job_id, reason, status, sent_at, responded_at,
@@ -541,7 +620,7 @@ func (a *Adapter) ListPendingHITL(ctx context.Context, tenantID string) ([]*doma
 	FROM hitl_requests WHERE tenant_id = $1 AND status = 'pending'
 	ORDER BY sent_at DESC`
 
-	rows, err := a.pool.Query(ctx, query, tenantID)
+	rows, err := a.getExec(ctx).Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("listing pending HITL: %w", err)
 	}
@@ -580,7 +659,7 @@ func (a *Adapter) AppendAuditEvent(ctx context.Context, event *domain.AuditEvent
 			gen_random_uuid()::TEXT, $1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10
 		)`
-		_, err := a.pool.Exec(ctx, query,
+		_, err := a.getExec(ctx).Exec(ctx, query,
 			event.TenantID, event.Actor, event.Action, event.TargetType, event.TargetID,
 			event.OldState, event.NewState, event.TraceID, event.CorrelationID,
 			event.Timestamp,
@@ -598,7 +677,7 @@ func (a *Adapter) AppendAuditEvent(ctx context.Context, event *domain.AuditEvent
 		$1, $2, $3, $4, $5, $6,
 		$7, $8, $9, $10, $11
 	)`
-	_, err := a.pool.Exec(ctx, query,
+	_, err := a.getExec(ctx).Exec(ctx, query,
 		event.ID, event.TenantID, event.Actor, event.Action, event.TargetType, event.TargetID,
 		event.OldState, event.NewState, event.TraceID, event.CorrelationID,
 		event.Timestamp,
@@ -636,7 +715,7 @@ func (a *Adapter) ListAuditEvents(ctx context.Context, tenantID, targetType, tar
 		argIdx++
 	}
 
-	rows, err := a.pool.Query(ctx, query, args...)
+	rows, err := a.getExec(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing audit events: %w", err)
 	}
@@ -675,7 +754,7 @@ func (a *Adapter) GetRecentJobs(ctx context.Context, tenantID string, limit int)
 	ORDER BY created_at DESC
 	LIMIT $2`
 
-	rows, err := a.pool.Query(ctx, query, tenantID, limit)
+	rows, err := a.getExec(ctx).Query(ctx, query, tenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("getting recent jobs: %w", err)
 	}
@@ -719,7 +798,7 @@ func (a *Adapter) GetRiskyVendors(ctx context.Context, tenantID string) ([]*doma
 	AND (trust_battery->>'tier' IN ('PROBATION', 'NONE', 'BLOCKED') OR risk_score < 30)
 	ORDER BY trust_battery->>'tier', risk_score`
 
-	rows, err := a.pool.Query(ctx, query, tenantID)
+	rows, err := a.getExec(ctx).Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("getting risky vendors: %w", err)
 	}
@@ -755,7 +834,7 @@ func (a *Adapter) GetRecentCompliance(ctx context.Context, tenantID string, limi
 	ORDER BY created_at DESC
 	LIMIT $2`
 
-	rows, err := a.pool.Query(ctx, query, tenantID, limit)
+	rows, err := a.getExec(ctx).Query(ctx, query, tenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("getting recent compliance: %w", err)
 	}
@@ -773,5 +852,286 @@ func (a *Adapter) GetRecentCompliance(ctx context.Context, tenantID string, limi
 	return records, nil
 }
 
-// Compile-time interface check.
+// ---------------------------------------------------------------------------
+// Tenant methods
+// ---------------------------------------------------------------------------
+
+// GetTenant retrieves a tenant by id.
+func (a *Adapter) GetTenant(ctx context.Context, id string) (*domain.Tenant, error) {
+	query := `SELECT id, name, slug, plan, status, config, created_at, updated_at
+	FROM tenants WHERE id = $1`
+
+	row := a.getExec(ctx).QueryRow(ctx, query, id)
+
+	t := &domain.Tenant{}
+	var configJSON []byte
+
+	err := row.Scan(
+		&t.ID, &t.Name, &t.Slug, &t.Plan, &t.Status,
+		&configJSON, &t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("getting tenant %s: %w", id, err)
+	}
+
+	if len(configJSON) > 0 {
+		_ = json.Unmarshal(configJSON, &t.Config)
+	}
+	if t.Config == nil {
+		t.Config = make(map[string]any)
+	}
+
+	return t, nil
+}
+
+// GetTenantBySlug retrieves a tenant by slug.
+func (a *Adapter) GetTenantBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
+	query := `SELECT id, name, slug, plan, status, config, created_at, updated_at
+	FROM tenants WHERE slug = $1`
+
+	row := a.getExec(ctx).QueryRow(ctx, query, slug)
+
+	t := &domain.Tenant{}
+	var configJSON []byte
+
+	err := row.Scan(
+		&t.ID, &t.Name, &t.Slug, &t.Plan, &t.Status,
+		&configJSON, &t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("getting tenant by slug %s: %w", slug, err)
+	}
+
+	if len(configJSON) > 0 {
+		_ = json.Unmarshal(configJSON, &t.Config)
+	}
+	if t.Config == nil {
+		t.Config = make(map[string]any)
+	}
+
+	return t, nil
+}
+
+// CreateTenant inserts a new tenant record.
+func (a *Adapter) CreateTenant(ctx context.Context, tenant *domain.Tenant) error {
+	configJSON, _ := json.Marshal(tenant.Config)
+	now := time.Now()
+	if tenant.CreatedAt.IsZero() {
+		tenant.CreatedAt = now
+	}
+	if tenant.UpdatedAt.IsZero() {
+		tenant.UpdatedAt = now
+	}
+
+	query := `INSERT INTO tenants (
+		id, name, slug, plan, status, config, created_at, updated_at
+	) VALUES (
+		$1, $2, $3, $4, $5, $6, $7, $8
+	) ON CONFLICT (id) DO UPDATE SET
+		name = EXCLUDED.name,
+		slug = EXCLUDED.slug,
+		plan = EXCLUDED.plan,
+		status = EXCLUDED.status,
+		config = EXCLUDED.config,
+		updated_at = EXCLUDED.updated_at`
+
+	_, err := a.getExec(ctx).Exec(ctx, query,
+		tenant.ID, tenant.Name, tenant.Slug,
+		tenant.Plan, tenant.Status, configJSON,
+		tenant.CreatedAt, tenant.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("creating tenant: %w", err)
+	}
+	return nil
+}
+
+// ListTenants retrieves all tenants.
+func (a *Adapter) ListTenants(ctx context.Context) ([]*domain.Tenant, error) {
+	query := `SELECT id, name, slug, plan, status, config, created_at, updated_at
+	FROM tenants ORDER BY created_at DESC`
+
+	rows, err := a.getExec(ctx).Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("listing tenants: %w", err)
+	}
+	defer rows.Close()
+
+	var tenants []*domain.Tenant
+	for rows.Next() {
+		t := &domain.Tenant{}
+		var configJSON []byte
+
+		if err := rows.Scan(
+			&t.ID, &t.Name, &t.Slug, &t.Plan, &t.Status,
+			&configJSON, &t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning tenant row: %w", err)
+		}
+
+		if len(configJSON) > 0 {
+			_ = json.Unmarshal(configJSON, &t.Config)
+		}
+		if t.Config == nil {
+			t.Config = make(map[string]any)
+		}
+
+		tenants = append(tenants, t)
+	}
+
+	return tenants, nil
+}
+
+// UpdateTenantStatus updates the status of a tenant.
+func (a *Adapter) UpdateTenantStatus(ctx context.Context, id, status string) error {
+	query := `UPDATE tenants SET status = $1, updated_at = NOW() WHERE id = $2`
+
+	result, err := a.getExec(ctx).Exec(ctx, query, status, id)
+	if err != nil {
+		return fmt.Errorf("updating tenant status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("tenant %s not found", id)
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Usage metering methods
+// ---------------------------------------------------------------------------
+
+// currentPeriodBounds returns the start and end of the current calendar month (UTC).
+func currentPeriodBounds() (time.Time, time.Time) {
+	now := time.Now().UTC()
+	year, month, _ := now.Date()
+	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	return start, end
+}
+
+// IncrementUsage upserts a usage record for the current billing period,
+// incrementing the count by the given delta.
+func (a *Adapter) IncrementUsage(ctx context.Context, tenantID string, metric domain.Metric, delta int64) error {
+	start, end := currentPeriodBounds()
+
+	query := `INSERT INTO usage_records (tenant_id, metric, count, period_start, period_end, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		ON CONFLICT (tenant_id, metric, period_start) DO UPDATE SET
+			count = usage_records.count + EXCLUDED.count,
+			updated_at = NOW()`
+
+	_, err := a.getExec(ctx).Exec(ctx, query, tenantID, string(metric), delta, start, end)
+	if err != nil {
+		return fmt.Errorf("incrementing usage for %s/%s: %w", tenantID, metric, err)
+	}
+	return nil
+}
+
+// GetUsage returns the current count for a given tenant and metric in the current billing period.
+func (a *Adapter) GetUsage(ctx context.Context, tenantID string, metric domain.Metric) (int64, error) {
+	start, _ := currentPeriodBounds()
+
+	query := `SELECT count FROM usage_records
+		WHERE tenant_id = $1 AND metric = $2 AND period_start = $3`
+
+	var count int64
+	err := a.getExec(ctx).QueryRow(ctx, query, tenantID, string(metric), start).Scan(&count)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("getting usage for %s/%s: %w", tenantID, metric, err)
+	}
+	return count, nil
+}
+
+// GetCurrentPeriodUsage returns all usage metrics for the current billing period for a tenant.
+func (a *Adapter) GetCurrentPeriodUsage(ctx context.Context, tenantID string) (map[domain.Metric]int64, error) {
+	start, _ := currentPeriodBounds()
+
+	query := `SELECT metric, count FROM usage_records
+		WHERE tenant_id = $1 AND period_start = $2`
+
+	rows, err := a.getExec(ctx).Query(ctx, query, tenantID, start)
+	if err != nil {
+		return nil, fmt.Errorf("getting current period usage for %s: %w", tenantID, err)
+	}
+	defer rows.Close()
+
+	usage := make(map[domain.Metric]int64)
+	for rows.Next() {
+		var metricStr string
+		var count int64
+		if err := rows.Scan(&metricStr, &count); err != nil {
+			return nil, fmt.Errorf("scanning usage row: %w", err)
+		}
+		usage[domain.Metric(metricStr)] = count
+	}
+	return usage, nil
+}
+
+// CheckLimit checks whether the tenant is within the limit for the given metric.
+// Returns (within_limit, current_usage, limit, error).
+func (a *Adapter) CheckLimit(ctx context.Context, tenantID string, metric domain.Metric) (bool, int64, int64, error) {
+	// Get the tenant's plan.
+	tenant, err := a.GetTenant(ctx, tenantID)
+	if err != nil {
+		return false, 0, 0, fmt.Errorf("getting tenant for limit check: %w", err)
+	}
+
+	limit := domain.GetLimit(tenant.Plan, metric)
+	if domain.IsUnlimited(limit) {
+		return true, 0, limit, nil
+	}
+
+	current, err := a.GetUsage(ctx, tenantID, metric)
+	if err != nil {
+		return false, 0, limit, fmt.Errorf("getting usage for limit check: %w", err)
+	}
+
+	return current < limit, current, limit, nil
+}
+
+// ---------------------------------------------------------------------------
+// Transaction support for RLS
+// ---------------------------------------------------------------------------
+
+// Begin starts a new transaction that can be used via WithTx in context.
+func (a *Adapter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := a.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	return tx, nil
+}
+
+// SetTenantContextTx sets app.tenant_id inside an explicit transaction.
+// This is the correct way to enable RLS — SET LOCAL only works inside a transaction.
+func SetTenantContextTx(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	_, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, TRUE)", tenantID)
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// RLS (Row-Level Security) support
+// ---------------------------------------------------------------------------
+
+// SetTenantContext sets the app.tenant_id session variable for the current
+// connection. This enables PostgreSQL Row-Level Security (RLS) policies to
+// filter queries to the current tenant.
+//
+// NOTE: Setting the session variable outside an explicit transaction is
+// effectively a no-op in PostgreSQL — it only lasts for the duration of
+// the implicit transaction of the single Exec call. For RLS to actually
+// work, use SetTenantContextTx inside an explicit transaction, or wrap
+// requests with the txMiddleware in main.go.
+func (a *Adapter) SetTenantContext(ctx context.Context, tenantID string) error {
+	_, err := a.getExec(ctx).Exec(ctx, "SELECT set_config('app.tenant_id', $1, TRUE)", tenantID)
+	return err
+}
+
+// Compile-time interface checks.
 var _ providers.DBProvider = (*Adapter)(nil)
+var _ providers.UsageProvider = (*Adapter)(nil)

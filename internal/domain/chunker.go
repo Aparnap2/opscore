@@ -3,9 +3,9 @@ package domain
 import "fmt"
 
 const (
-	ChunkSizeTokens               = 500  // approximate tokens per chunk
-	ChunkSizeChars                = 2000 // characters (approximates tokens)
-	PageThresholdForChunking      = 10   // pages > 10 get chunked
+	ChunkSizeTokens          = 500  // approximate tokens per chunk
+	ChunkSizeChars           = 2000 // characters (approximates tokens)
+	PageThresholdForChunking = 10   // pages > 10 get chunked
 )
 
 // ShouldChunk returns true if document should be chunked

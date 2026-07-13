@@ -7,54 +7,54 @@ import (
 
 func TestTrustBattery_RecordSuccess(t *testing.T) {
 	tests := []struct {
-		name        string
-		initialTB  *TrustBattery
-		wantTier   TrustTier
+		name          string
+		initialTB     *TrustBattery
+		wantTier      TrustTier
 		wantSuccesses int
-		wantErrors int
+		wantErrors    int
 	}{
 		{
 			name: "first success",
 			initialTB: &TrustBattery{
-				Tier:       TrustTierProbation,
+				Tier:                 TrustTierProbation,
 				ConsecutiveSuccesses: 0,
-				ConsecutiveErrors:   0,
+				ConsecutiveErrors:    0,
 			},
-			wantTier:       TrustTierProbation,
+			wantTier:      TrustTierProbation,
 			wantSuccesses: 1,
 			wantErrors:    0,
 		},
 		{
 			name: "second success",
 			initialTB: &TrustBattery{
-				Tier:       TrustTierProbation,
+				Tier:                 TrustTierProbation,
 				ConsecutiveSuccesses: 1,
-				ConsecutiveErrors:   0,
+				ConsecutiveErrors:    0,
 			},
-			wantTier:       TrustTierProbation,
+			wantTier:      TrustTierProbation,
 			wantSuccesses: 2,
 			wantErrors:    0,
 		},
 		{
 			name: "third success triggers upgrade",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierProbation,
+				Tier:                 TrustTierProbation,
 				ConsecutiveSuccesses: 2,
 				ConsecutiveErrors:    0,
-				DaysInCurrentTier:  30,
+				DaysInCurrentTier:    30,
 			},
-			wantTier:       TrustTierStandard,
+			wantTier:      TrustTierStandard,
 			wantSuccesses: 0,
 			wantErrors:    0,
 		},
 		{
 			name: "STANDARD tier success",
 			initialTB: &TrustBattery{
-				Tier:       TrustTierStandard,
+				Tier:                 TrustTierStandard,
 				ConsecutiveSuccesses: 0,
-				ConsecutiveErrors:   0,
+				ConsecutiveErrors:    0,
 			},
-			wantTier:       TrustTierStandard,
+			wantTier:      TrustTierStandard,
 			wantSuccesses: 1,
 			wantErrors:    0,
 		},
@@ -79,49 +79,49 @@ func TestTrustBattery_RecordSuccess(t *testing.T) {
 
 func TestTrustBattery_RecordError(t *testing.T) {
 	tests := []struct {
-		name        string
-		initialTB   *TrustBattery
-		wantTier    TrustTier
+		name       string
+		initialTB  *TrustBattery
+		wantTier   TrustTier
 		wantErrors int
 	}{
 		{
 			name: "first error",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierStandard,
+				Tier:                 TrustTierStandard,
 				ConsecutiveSuccesses: 5,
 				ConsecutiveErrors:    0,
 			},
-			wantTier:    TrustTierStandard,
+			wantTier:   TrustTierStandard,
 			wantErrors: 1,
 		},
 		{
 			name: "second error",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierStandard,
+				Tier:                 TrustTierStandard,
 				ConsecutiveSuccesses: 5,
 				ConsecutiveErrors:    1,
 			},
-			wantTier:    TrustTierStandard,
+			wantTier:   TrustTierStandard,
 			wantErrors: 2,
 		},
 		{
 			name: "third error triggers downgrade",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierStandard,
+				Tier:                 TrustTierStandard,
 				ConsecutiveSuccesses: 5,
 				ConsecutiveErrors:    2,
 			},
-			wantTier:    TrustTierProbation,
+			wantTier:   TrustTierProbation,
 			wantErrors: 0,
 		},
 		{
 			name: "PROBATION tier stays at PROBATION",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierProbation,
+				Tier:                 TrustTierProbation,
 				ConsecutiveSuccesses: 0,
 				ConsecutiveErrors:    2,
 			},
-			wantTier:    TrustTierProbation,
+			wantTier:   TrustTierProbation,
 			wantErrors: 3,
 		},
 	}
@@ -142,18 +142,18 @@ func TestTrustBattery_RecordError(t *testing.T) {
 
 func TestTrustBattery_FraudFlagged(t *testing.T) {
 	tests := []struct {
-		name    string
+		name      string
 		initialTB *TrustBattery
-		wantTier TrustTier
+		wantTier  TrustTier
 		wantScore int
 	}{
 		{
 			name: "fraud from STANDARD",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierStandard,
-				TrustScore:         50,
+				Tier:                 TrustTierStandard,
+				TrustScore:           50,
 				ConsecutiveSuccesses: 10,
-				ConsecutiveErrors:  0,
+				ConsecutiveErrors:    0,
 			},
 			wantTier:  TrustTierBlocked,
 			wantScore: 0,
@@ -161,10 +161,10 @@ func TestTrustBattery_FraudFlagged(t *testing.T) {
 		{
 			name: "fraud from STRATEGIC",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierStrategic,
-				TrustScore:         100,
+				Tier:                 TrustTierStrategic,
+				TrustScore:           100,
 				ConsecutiveSuccesses: 50,
-				ConsecutiveErrors:  0,
+				ConsecutiveErrors:    0,
 			},
 			wantTier:  TrustTierBlocked,
 			wantScore: 0,
@@ -190,13 +190,13 @@ func TestTrustBattery_FraudFlagged(t *testing.T) {
 
 func TestTrustBattery_AdvanceDays(t *testing.T) {
 	now := time.Now().UTC()
-	
+
 	tests := []struct {
-		name        string
-		initialTB   *TrustBattery
-		days        int
-		wantTier    TrustTier
-		wantDays   int
+		name      string
+		initialTB *TrustBattery
+		days      int
+		wantTier  TrustTier
+		wantDays  int
 	}{
 		{
 			name: "advance 1 day",
@@ -204,30 +204,30 @@ func TestTrustBattery_AdvanceDays(t *testing.T) {
 				Tier:              TrustTierStandard,
 				DaysInCurrentTier: 0,
 			},
-			days:      1,
-			wantTier:  TrustTierStandard,
+			days:     1,
+			wantTier: TrustTierStandard,
 			wantDays: 1,
 		},
 		{
 			name: "PROBATION upgrade after 30 days and 3 successes",
 			initialTB: &TrustBattery{
-				Tier:              TrustTierProbation,
+				Tier:                 TrustTierProbation,
 				ConsecutiveSuccesses: 3,
-				DaysInCurrentTier:   20,
+				DaysInCurrentTier:    20,
 			},
-			days:      10,
-			wantTier:  TrustTierStandard,
+			days:     10,
+			wantTier: TrustTierStandard,
 			wantDays: 0,
 		},
 		{
 			name: "inactive downgrade after 90 days",
 			initialTB: &TrustBattery{
 				Tier:              TrustTierStandard,
-				DaysInCurrentTier:   95,
-				LastActiveAt:     &now,
+				DaysInCurrentTier: 95,
+				LastActiveAt:      &now,
 			},
-			days:      10,
-			wantTier:  TrustTierProbation,
+			days:     10,
+			wantTier: TrustTierProbation,
 			wantDays: 0,
 		},
 	}
@@ -249,11 +249,11 @@ func TestTrustBattery_AdvanceDays(t *testing.T) {
 func TestTrustBattery_ShouldDowngrade(t *testing.T) {
 	now := time.Now().UTC()
 	oldTime := now.Add(-181 * 24 * time.Hour)
-	
+
 	tests := []struct {
-		name  string
-		tb    *TrustBattery
-		want  bool
+		name string
+		tb   *TrustBattery
+		want bool
 	}{
 		{
 			name: "PROBATION never downgrades",
@@ -281,10 +281,10 @@ func TestTrustBattery_ShouldDowngrade(t *testing.T) {
 		{
 			name: "no downgrade needed",
 			tb: &TrustBattery{
-				Tier:              TrustTierStandard,
-				ConsecutiveErrors:  1,
+				Tier:                 TrustTierStandard,
+				ConsecutiveErrors:    1,
 				ConsecutiveSuccesses: 5,
-				LastActiveAt:       &now,
+				LastActiveAt:         &now,
 			},
 			want: false,
 		},
@@ -302,7 +302,7 @@ func TestTrustBattery_ShouldDowngrade(t *testing.T) {
 
 func TestTrustBattery_NewTrustBattery(t *testing.T) {
 	tb := NewTrustBattery()
-	
+
 	if tb.Tier != TrustTierProbation {
 		t.Errorf("NewTrustBattery().Tier = %v, want PROBATION", tb.Tier)
 	}
@@ -343,45 +343,45 @@ func TestTrustBattery_AllChecksPass(t *testing.T) {
 
 func TestTrustBattery_TransactionThresholdMet(t *testing.T) {
 	tests := []struct {
-		name   string
-		tb     *TrustBattery
-		txCount int
-		wantTier TrustTier
+		name      string
+		tb        *TrustBattery
+		txCount   int
+		wantTier  TrustTier
 		wantScore int
 	}{
 		{
-			name:   "STANDARD with 3 txns -> PREFERRED",
-			tb:     &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
-			txCount: 3,
-			wantTier: TrustTierPreferred,
+			name:      "STANDARD with 3 txns -> PREFERRED",
+			tb:        &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
+			txCount:   3,
+			wantTier:  TrustTierPreferred,
 			wantScore: 61,
 		},
 		{
-			name:   "STANDARD with 2 txns stays STANDARD",
-			tb:     &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
-			txCount: 2,
-			wantTier: TrustTierStandard,
+			name:      "STANDARD with 2 txns stays STANDARD",
+			tb:        &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
+			txCount:   2,
+			wantTier:  TrustTierStandard,
 			wantScore: 31,
 		},
 		{
-			name:   "PREFERRED with 10 txns -> STRATEGIC",
-			tb:     &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
-			txCount: 10,
-			wantTier: TrustTierStrategic,
+			name:      "PREFERRED with 10 txns -> STRATEGIC",
+			tb:        &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
+			txCount:   10,
+			wantTier:  TrustTierStrategic,
 			wantScore: 86,
 		},
 		{
-			name:   "PREFERRED with 5 txns stays PREFERRED",
-			tb:     &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
-			txCount: 5,
-			wantTier: TrustTierPreferred,
+			name:      "PREFERRED with 5 txns stays PREFERRED",
+			tb:        &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
+			txCount:   5,
+			wantTier:  TrustTierPreferred,
 			wantScore: 61,
 		},
 		{
-			name:   "PROBATION not affected",
-			tb:     &TrustBattery{Tier: TrustTierProbation, TrustScore: 0},
-			txCount: 100,
-			wantTier: TrustTierProbation,
+			name:      "PROBATION not affected",
+			tb:        &TrustBattery{Tier: TrustTierProbation, TrustScore: 0},
+			txCount:   100,
+			wantTier:  TrustTierProbation,
 			wantScore: 0,
 		},
 	}
@@ -402,33 +402,33 @@ func TestTrustBattery_TransactionThresholdMet(t *testing.T) {
 
 func TestTrustBattery_DisputeFiled(t *testing.T) {
 	tests := []struct {
-		name   string
-		tb     *TrustBattery
-		wantTier TrustTier
+		name      string
+		tb        *TrustBattery
+		wantTier  TrustTier
 		wantScore int
 	}{
 		{
-			name: "PREFERRED -> STANDARD",
-			tb: &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
-			wantTier: TrustTierStandard,
+			name:      "PREFERRED -> STANDARD",
+			tb:        &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
+			wantTier:  TrustTierStandard,
 			wantScore: 31,
 		},
 		{
-			name: "STRATEGIC -> PREFERRED",
-			tb: &TrustBattery{Tier: TrustTierStrategic, TrustScore: 86},
-			wantTier: TrustTierPreferred,
+			name:      "STRATEGIC -> PREFERRED",
+			tb:        &TrustBattery{Tier: TrustTierStrategic, TrustScore: 86},
+			wantTier:  TrustTierPreferred,
 			wantScore: 61,
 		},
 		{
-			name: "STANDARD not affected",
-			tb: &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
-			wantTier: TrustTierStandard,
+			name:      "STANDARD not affected",
+			tb:        &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
+			wantTier:  TrustTierStandard,
 			wantScore: 31,
 		},
 		{
-			name: "PROBATION not affected",
-			tb: &TrustBattery{Tier: TrustTierProbation, TrustScore: 0},
-			wantTier: TrustTierProbation,
+			name:      "PROBATION not affected",
+			tb:        &TrustBattery{Tier: TrustTierProbation, TrustScore: 0},
+			wantTier:  TrustTierProbation,
 			wantScore: 0,
 		},
 	}
@@ -452,38 +452,38 @@ func TestTrustBattery_DisputeFiled(t *testing.T) {
 
 func TestTrustBattery_InactivityDecay(t *testing.T) {
 	tests := []struct {
-		name   string
-		tb     *TrustBattery
-		days   int
-		wantTier TrustTier
+		name      string
+		tb        *TrustBattery
+		days      int
+		wantTier  TrustTier
 		wantScore int
 	}{
 		{
-			name: "STRATEGIC with 200 days -> PREFERRED",
-			tb: &TrustBattery{Tier: TrustTierStrategic, TrustScore: 86},
-			days: 200,
-			wantTier: TrustTierPreferred,
+			name:      "STRATEGIC with 200 days -> PREFERRED",
+			tb:        &TrustBattery{Tier: TrustTierStrategic, TrustScore: 86},
+			days:      200,
+			wantTier:  TrustTierPreferred,
 			wantScore: 61,
 		},
 		{
-			name: "PREFERRED with 180 days -> STANDARD",
-			tb: &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
-			days: 180,
-			wantTier: TrustTierStandard,
+			name:      "PREFERRED with 180 days -> STANDARD",
+			tb:        &TrustBattery{Tier: TrustTierPreferred, TrustScore: 61},
+			days:      180,
+			wantTier:  TrustTierStandard,
 			wantScore: 31,
 		},
 		{
-			name: "STRATEGIC with 100 days unchanged",
-			tb: &TrustBattery{Tier: TrustTierStrategic, TrustScore: 86},
-			days: 100,
-			wantTier: TrustTierStrategic,
+			name:      "STRATEGIC with 100 days unchanged",
+			tb:        &TrustBattery{Tier: TrustTierStrategic, TrustScore: 86},
+			days:      100,
+			wantTier:  TrustTierStrategic,
 			wantScore: 86,
 		},
 		{
-			name: "STANDARD with 200 days unchanged",
-			tb: &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
-			days: 200,
-			wantTier: TrustTierStandard,
+			name:      "STANDARD with 200 days unchanged",
+			tb:        &TrustBattery{Tier: TrustTierStandard, TrustScore: 31},
+			days:      200,
+			wantTier:  TrustTierStandard,
 			wantScore: 31,
 		},
 	}

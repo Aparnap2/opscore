@@ -1,11 +1,17 @@
-# OpsCore v3.0 - GCP Local Emulation
-# Full stack: PostgreSQL, MinIO (S3), Pub/Sub emulator, and the app server
+# OpsCore v3.0 - Full Stack (Production-Grade, Multi-Tenant)
+# Services: PostgreSQL 16, MinIO (S3), Redis 7, and the Go API server.
+#
+# No PubSub emulator — OpsCore uses Redis for queueing.
+# PostgreSQL init-db.sh seeds default + dev tenants for development.
 #
 # Usage:
 #   docker compose up -d                        # Start everything
 #   docker compose logs -f                      # Follow logs
 #   docker compose down                          # Stop and remove
 #   docker compose down -v                       # Stop and wipe volumes (data loss)
+#
+# Environment variables (copy .env.example to .env):
+#   cp .env.example .env  # then fill in secrets (SARVAM_API_KEY, SLACK_*, etc.)
 
 services:
   postgres:
@@ -16,7 +22,9 @@ services:
       POSTGRES_DB: opscore
       POSTGRES_USER: opscore
       POSTGRES_PASSWORD: opscore
-    volumes: [postgres-data:/var/lib/postgresql/data]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U opscore -d opscore"]
       interval: 10s
@@ -42,17 +50,16 @@ services:
       start_period: 10s
     networks: [opscore-net]
 
-  pubsub:
-    image: google/cloud-sdk:latest
-    container_name: opscore-pubsub
-    ports: ["8085:8085"]
-    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=opscore-local
+  redis:
+    image: redis:7-alpine
+    container_name: opscore-redis
+    ports: ["6380:6379"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 5
-      start_period: 15s
+      start_period: 5s
     networks: [opscore-net]
 
   app:
@@ -60,26 +67,52 @@ services:
     container_name: opscore-app
     ports: ["8080:8080"]
     environment:
+      # Database
       DATABASE_URL: postgres://opscore:opscore@postgres:5432/opscore?sslmode=disable
+
+      # S3-compatible storage (MinIO)
       S3_ENDPOINT: minio:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_USE_SSL: "false"
-      PUBSUB_EMULATOR_HOST: pubsub:8085
-      PUBSUB_PROJECT_ID: opscore-local
+
+      # Queue (Redis — replaces PubSub)
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+
+      # AI providers (optional; omit in dev to skip)
       SARVAM_API_KEY: ""
+
+      # Slack HITL (optional)
       SLACK_BOT_TOKEN: ""
       SLACK_SIGNING_SECRET: ""
       SLACK_HITL_CHANNEL: ""
+
+      # API keys for dev authentication (three roles)
+      OWNER_API_KEY: owner-dev-key
+      OPS_ADMIN_API_KEY: ops-admin-dev-key
+      REVIEWER_API_KEY: reviewer-dev-key
+
+      # Server
       PORT: "8080"
       APP_ENV: development
+
+      # Rate limiting
+      RATE_LIMIT_RPS: "100"
+      RATE_LIMIT_BURST: "200"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
-      pubsub:
-        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     networks: [opscore-net]
 
 networks:

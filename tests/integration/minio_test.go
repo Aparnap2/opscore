@@ -12,7 +12,7 @@ import (
 func TestMinIOAdapter(t *testing.T) {
 	endpoint := os.Getenv("TEST_S3_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "localhost:9002"
+		endpoint = "localhost:9000"
 	}
 	accessKey := os.Getenv("TEST_S3_ACCESS_KEY")
 	if accessKey == "" {

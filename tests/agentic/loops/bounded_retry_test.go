@@ -98,10 +98,10 @@ func TestRetry_JobStatusBounded_IsRetryableOnRetryableFailed(t *testing.T) {
 // retryMockDB is an in-memory DB provider that tracks retry attempts
 // and simulates repeated failures.
 type retryMockDB struct {
-	mu          sync.Mutex
-	jobs        map[string]*domain.Job
-	retryCount  int           // tracks how many times a retry was recorded
-	maxRetries  int           // max retries before terminal
+	mu         sync.Mutex
+	jobs       map[string]*domain.Job
+	retryCount int // tracks how many times a retry was recorded
+	maxRetries int // max retries before terminal
 }
 
 func newRetryMockDB(maxRetries int) *retryMockDB {
@@ -145,7 +145,7 @@ func (m *retryMockDB) ListJobs(_ context.Context, tenantID string, _ domain.Work
 
 func (m *retryMockDB) UpsertVendor(_ context.Context, _ *domain.Vendor) error { return nil }
 
-func (m *retryMockDB) GetVendor(_ context.Context, _ string) (*domain.Vendor, error) {
+func (m *retryMockDB) GetVendor(_ context.Context, _, _ string) (*domain.Vendor, error) {
 	return nil, fmt.Errorf("not found")
 }
 
@@ -155,7 +155,7 @@ func (m *retryMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor
 
 func (m *retryMockDB) UpsertDocument(_ context.Context, _ *domain.Document) error { return nil }
 
-func (m *retryMockDB) GetDocument(_ context.Context, _ string) (*domain.Document, error) {
+func (m *retryMockDB) GetDocument(_ context.Context, _, _ string) (*domain.Document, error) {
 	return nil, fmt.Errorf("not found")
 }
 
@@ -165,7 +165,7 @@ func (m *retryMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Docu
 
 func (m *retryMockDB) UpsertHITLRequest(_ context.Context, _ *domain.HITLRequest) error { return nil }
 
-func (m *retryMockDB) GetHITLRequest(_ context.Context, _ string) (*domain.HITLRequest, error) {
+func (m *retryMockDB) GetHITLRequest(_ context.Context, _, _ string) (*domain.HITLRequest, error) {
 	return nil, fmt.Errorf("not found")
 }
 
@@ -194,8 +194,8 @@ func (m *retryMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([
 // retrySimulator simulates a simple agent workflow with capped retries.
 // It is the in-memory equivalent of the retry logic an agent would use.
 type retrySimulator struct {
-	db          *retryMockDB
-	maxRetries  int
+	db         *retryMockDB
+	maxRetries int
 }
 
 func newRetrySimulator(db *retryMockDB) *retrySimulator {
@@ -498,7 +498,7 @@ func TestRetry_GuardFunction_Explicit(t *testing.T) {
 	}
 
 	tests := []struct {
-		status  domain.JobStatus
+		status   domain.JobStatus
 		canRetry bool
 	}{
 		{domain.JobStatusPending, false},

@@ -8,11 +8,11 @@ import (
 	"sync"
 	"testing"
 
-	agentic "github.com/aparna/opscore/tests/agentic"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 	"github.com/aparna/opscore/internal/telemetry"
+	agentic "github.com/aparna/opscore/tests/agentic"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,47 +30,147 @@ type docMockDB struct {
 
 func newDocMockDB() *docMockDB {
 	return &docMockDB{
-		jobs:     make(map[string]*domain.Job),
-		vendors:  make(map[string]*domain.Vendor),
+		jobs:      make(map[string]*domain.Job),
+		vendors:   make(map[string]*domain.Vendor),
 		documents: make(map[string]*domain.Document),
-		hitlReqs: make(map[string]*domain.HITLRequest),
+		hitlReqs:  make(map[string]*domain.HITLRequest),
 	}
 }
 
 func (m *docMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	existing, exists := m.jobs[job.ID]
-	if exists { job.Version = existing.Version + 1 }
+	if exists {
+		job.Version = existing.Version + 1
+	}
 	m.jobs[job.ID] = job
 	return nil
 }
 func (m *docMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
-	if !ok { return nil, fmt.Errorf("job not found") }
-	if j.TenantID != tenantID { return nil, fmt.Errorf("job not found") }
+	if !ok {
+		return nil, fmt.Errorf("job not found")
+	}
+	if j.TenantID != tenantID {
+		return nil, fmt.Errorf("job not found")
+	}
 	return j, nil
 }
 func (m *docMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var r []*domain.Job
-	for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
 	return r, nil
 }
-func (m *docMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error { m.mu.Lock(); defer m.mu.Unlock(); m.vendors[v.ID] = v; return nil }
-func (m *docMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) { m.mu.Lock(); defer m.mu.Unlock(); v, ok := m.vendors[id]; if !ok { return nil, fmt.Errorf("vendor not found") }; return v, nil }
-func (m *docMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *docMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *docMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("document not found") }; return d, nil }
-func (m *docMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *docMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *docMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("HITL not found") }; return r, nil }
-func (m *docMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.HITLRequest; for _, h := range m.hitlReqs { if h.TenantID == tenantID && h.Status == domain.HITLStatusPending { r = append(r, h) } }; return r, nil }
-func (m *docMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error { m.mu.Lock(); defer m.mu.Unlock(); m.auditEvents = append(m.auditEvents, e); return nil }
-func (m *docMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.AuditEvent; for _, e := range m.auditEvents { if e.TenantID != tenantID { continue }; if targetType != "" && e.TargetType != targetType { continue }; if targetID != "" && e.TargetID != targetID { continue }; r = append(r, e); if limit > 0 && len(r) >= limit { break } }; return r, nil }
-func (m *docMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *docMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *docMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *docMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vendors[v.ID] = v
+	return nil
+}
+func (m *docMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.vendors[id]
+	if !ok || v.TenantID != tenantID {
+		return nil, fmt.Errorf("vendor not found")
+	}
+	return v, nil
+}
+func (m *docMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *docMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *docMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("document not found")
+	}
+	return d, nil
+}
+func (m *docMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *docMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *docMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("HITL not found")
+	}
+	return r, nil
+}
+func (m *docMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.HITLRequest
+	for _, h := range m.hitlReqs {
+		if h.TenantID == tenantID && h.Status == domain.HITLStatusPending {
+			r = append(r, h)
+		}
+	}
+	return r, nil
+}
+func (m *docMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *docMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
+}
+func (m *docMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.AuditEvent
+	for _, e := range m.auditEvents {
+		if e.TenantID != tenantID {
+			continue
+		}
+		if targetType != "" && e.TargetType != targetType {
+			continue
+		}
+		if targetID != "" && e.TargetID != targetID {
+			continue
+		}
+		r = append(r, e)
+		if limit > 0 && len(r) >= limit {
+			break
+		}
+	}
+	return r, nil
+}
+func (m *docMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *docMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *docMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 type docMockStorage struct {
 	mu   sync.Mutex
@@ -81,19 +181,28 @@ func newDocMockStorage() *docMockStorage {
 	return &docMockStorage{urls: make(map[string]string)}
 }
 func (m *docMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	url := fmt.Sprintf("https://storage.local/%s/%s", container, key)
 	m.urls[key] = url
 	return url, nil
 }
-func (m *docMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) { return nil, fmt.Errorf("not implemented") }
+func (m *docMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("not implemented")
+}
 func (m *docMockStorage) Delete(_ context.Context, _, _ string) error { return nil }
-func (m *docMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) { return nil, nil }
+func (m *docMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) {
+	return nil, nil
+}
 
 type docMockQueue struct{}
 
-func (m *docMockQueue) Enqueue(_ context.Context, _ string, _ any) (string, error) { return "msg-1", nil }
-func (m *docMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) { return nil, nil }
+func (m *docMockQueue) Enqueue(_ context.Context, _ string, _ any) (string, error) {
+	return "msg-1", nil
+}
+func (m *docMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) {
+	return nil, nil
+}
 func (m *docMockQueue) Delete(_ context.Context, _, _ string) error { return nil }
 func (m *docMockQueue) Poison(_ context.Context, _, _ string) error { return nil }
 
@@ -148,7 +257,7 @@ func TestDocumentAgent_HighConfidence_ValidData_AutoComplete(t *testing.T) {
 		t.Errorf("Job status = %s, want %s", dbJob.Status, domain.JobStatusCompleted)
 	}
 	// No HITL generated
-	_, hitlErr := db.GetHITLRequest(context.Background(), "hitl-doc-dec-test-1")
+	_, hitlErr := db.GetHITLRequest(context.Background(), "hitl-doc-dec-test-1", "tenant-dec-1")
 	if hitlErr == nil {
 		t.Error("Unexpected HITL request found for auto-complete")
 	}

@@ -90,12 +90,12 @@ func NewDocumentAgent(
 
 // DocumentJob represents a document processing job
 type DocumentJob struct {
-	TenantID  string `json:"tenant_id"`
+	TenantID string `json:"tenant_id"`
 	JobID    string `json:"job_id"`
 	BlobURL  string `json:"blob_url"`
 	FileName string `json:"file_name"`
-	Type    string `json:"type"`
-	JobType string `json:"job_type"`
+	Type     string `json:"type"`
+	JobType  string `json:"job_type"`
 }
 
 // ProcessDocument handles the complete document ingestion workflow

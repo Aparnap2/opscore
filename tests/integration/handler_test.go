@@ -84,11 +84,11 @@ func (m *mockHandlerDB) UpsertVendor(_ context.Context, vendor *domain.Vendor) e
 	return nil
 }
 
-func (m *mockHandlerDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) {
+func (m *mockHandlerDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	v, ok := m.vendors[id]
-	if !ok {
+	if !ok || v.TenantID != tenantID {
 		return nil, fmt.Errorf("vendor not found")
 	}
 	return v, nil
@@ -113,11 +113,11 @@ func (m *mockHandlerDB) UpsertDocument(_ context.Context, doc *domain.Document) 
 	return nil
 }
 
-func (m *mockHandlerDB) GetDocument(_ context.Context, id string) (*domain.Document, error) {
+func (m *mockHandlerDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.documents[id]
-	if !ok {
+	if !ok || d.TenantID != tenantID {
 		return nil, fmt.Errorf("document not found")
 	}
 	return d, nil
@@ -141,11 +141,11 @@ func (m *mockHandlerDB) UpsertHITLRequest(_ context.Context, req *domain.HITLReq
 	return nil
 }
 
-func (m *mockHandlerDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) {
+func (m *mockHandlerDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.hitlRequests[id]
-	if !ok {
+	if !ok || r.TenantID != tenantID {
 		return nil, fmt.Errorf("HITL request not found")
 	}
 	return r, nil
@@ -159,6 +159,38 @@ func (m *mockHandlerDB) ListPendingHITL(_ context.Context, tenantID string) ([]*
 		if r.TenantID == tenantID && r.Status == domain.HITLStatusPending {
 			result = append(result, r)
 		}
+	}
+	return result, nil
+}
+
+func (m *mockHandlerDB) ListHITLRequests(_ context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.HITLRequest
+	for _, r := range m.hitlRequests {
+		if r.TenantID != tenantID {
+			continue
+		}
+		if status != "" && string(r.Status) != status {
+			continue
+		}
+		result = append(result, r)
+	}
+	// Sort by sent_at descending (simple bubble sort for mock).
+	for i := 0; i < len(result); i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].SentAt.Before(result[j].SentAt) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	// Apply pagination.
+	if offset >= len(result) {
+		return []*domain.HITLRequest{}, nil
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
 	}
 	return result, nil
 }
@@ -193,8 +225,8 @@ func (m *mockHandlerDB) ListAuditEvents(_ context.Context, tenantID, targetType,
 
 // mockHandlerStorage implements StorageProvider for handler tests.
 type mockHandlerStorage struct {
-	mu     sync.Mutex
-	urls   map[string]string
+	mu    sync.Mutex
+	urls  map[string]string
 	upErr error
 }
 
@@ -223,9 +255,9 @@ func (m *mockHandlerStorage) List(_ context.Context, _, _ string) ([]providers.B
 
 // mockHandlerQueue implements QueueProvider + Ping.
 type mockHandlerQueue struct {
-	mu        sync.Mutex
-	messages  []string
-	pingErr   error
+	mu         sync.Mutex
+	messages   []string
+	pingErr    error
 	enqueueErr error
 }
 
@@ -282,10 +314,10 @@ const (
 )
 
 type testServerDeps struct {
-	db     *mockHandlerDB
-	stor   *mockHandlerStorage
-	q      *mockHandlerQueue
-	slack  *mockSlackParser
+	db    *mockHandlerDB
+	stor  *mockHandlerStorage
+	q     *mockHandlerQueue
+	slack *mockSlackParser
 }
 
 func newTestServer() *testServerDeps {
@@ -445,8 +477,8 @@ func (s *testServerDeps) uploadHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Input: map[string]string{
-			"filename": header.Filename,
-			"blob_url": blobURL,
+			"filename":     header.Filename,
+			"blob_url":     blobURL,
 			"content_hash": contentHash,
 		},
 	}
@@ -525,13 +557,13 @@ func (s *testServerDeps) jobStatusHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":           job.ID,
+		"id":            job.ID,
 		"workflow_type": string(job.WorkflowType),
-		"status":       string(job.Status),
-		"created_at":   job.CreatedAt,
-		"updated_at":   job.UpdatedAt,
-		"output":       job.Output,
-		"error":        job.Error,
+		"status":        string(job.Status),
+		"created_at":    job.CreatedAt,
+		"updated_at":    job.UpdatedAt,
+		"output":        job.Output,
+		"error":         job.Error,
 	})
 }
 
@@ -619,7 +651,7 @@ func (s *testServerDeps) handleVendorGet(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	vendor, err := s.db.GetVendor(r.Context(), vendorID)
+	vendor, err := s.db.GetVendor(r.Context(), vendorID, tenantID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Vendor not found")
 		return
@@ -631,9 +663,9 @@ func (s *testServerDeps) handleVendorGet(w http.ResponseWriter, r *http.Request,
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"vendor_id": vendor.ID,
-		"name":      vendor.Name,
-		"status":    status,
+		"vendor_id":  vendor.ID,
+		"name":       vendor.Name,
+		"status":     status,
 		"gst_number": vendor.GSTNumber,
 		"pan_number": vendor.PANNumber,
 		"risk_score": vendor.RiskScore,
@@ -745,7 +777,7 @@ func (s *testServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Requ
 		job.UpdatedAt = time.Now()
 		_ = s.db.UpsertJob(ctx, job)
 
-		hitlReq, err := s.db.GetHITLRequest(ctx, "hitl-"+jobID)
+		hitlReq, err := s.db.GetHITLRequest(ctx, "hitl-"+jobID, "default")
 		if err == nil && hitlReq != nil {
 			hitlReq.Status = hitlStatus
 			t := time.Now()
@@ -1121,7 +1153,12 @@ func TestVendorHandler_Get(t *testing.T) {
 	}
 	_ = srv.db.UpsertVendor(nil, vendor)
 
-	resp, err := ts.Client().Get(ts.URL + "/vendors/" + vendorID)
+	req, err := http.NewRequest("GET", ts.URL+"/vendors/"+vendorID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("X-Tenant-ID", "test-tenant")
+	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatalf("Get vendor: %v", err)
 	}
@@ -1309,7 +1346,7 @@ func TestSlackWebhook_BlockActions_Approve(t *testing.T) {
 	}
 
 	// Verify HITL request updated
-	updatedHITL, err := srv.db.GetHITLRequest(nil, "hitl-"+jobID)
+	updatedHITL, err := srv.db.GetHITLRequest(nil, "hitl-"+jobID, "default")
 	if err != nil {
 		t.Fatalf("GetHITLRequest: %v", err)
 	}
@@ -1401,7 +1438,7 @@ func TestSlackWebhook_BlockActions_Reject(t *testing.T) {
 		t.Errorf("job status = %s, want %s", updatedJob.Status, domain.JobStatusFailed)
 	}
 
-	updatedHITL, _ := srv.db.GetHITLRequest(nil, "hitl-"+jobID)
+	updatedHITL, _ := srv.db.GetHITLRequest(nil, "hitl-"+jobID, "default")
 	if updatedHITL.Status != domain.HITLStatusRejected {
 		t.Errorf("HITL status = %s, want REJECTED", updatedHITL.Status)
 	}

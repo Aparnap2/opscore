@@ -8,11 +8,11 @@ import (
 	"sync"
 	"testing"
 
-	agentic "github.com/aparna/opscore/tests/agentic"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 	"github.com/aparna/opscore/internal/telemetry"
+	agentic "github.com/aparna/opscore/tests/agentic"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,49 +30,181 @@ type soMockDB struct {
 
 func newSOMockDB() *soMockDB {
 	return &soMockDB{
-		jobs:     make(map[string]*domain.Job),
-		vendors:  make(map[string]*domain.Vendor),
+		jobs:      make(map[string]*domain.Job),
+		vendors:   make(map[string]*domain.Vendor),
 		documents: make(map[string]*domain.Document),
-		hitlReqs: make(map[string]*domain.HITLRequest),
+		hitlReqs:  make(map[string]*domain.HITLRequest),
 	}
 }
 
-func (m *soMockDB) UpsertJob(_ context.Context, job *domain.Job) error { m.mu.Lock(); defer m.mu.Unlock(); m.jobs[job.ID] = job; return nil }
-func (m *soMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); j, ok := m.jobs[id]; if !ok { return nil, fmt.Errorf("not found") }; if j.TenantID != tenantID { return nil, fmt.Errorf("not found") }; return j, nil }
-func (m *soMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.Job; for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }; return r, nil }
-func (m *soMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error { m.mu.Lock(); defer m.mu.Unlock(); m.vendors[v.ID] = v; return nil }
-func (m *soMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) { m.mu.Lock(); defer m.mu.Unlock(); v, ok := m.vendors[id]; if !ok { return nil, fmt.Errorf("not found") }; return v, nil }
-func (m *soMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *soMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *soMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("not found") }; return d, nil }
-func (m *soMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *soMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *soMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("not found") }; return r, nil }
-func (m *soMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.HITLRequest; for _, h := range m.hitlReqs { if h.TenantID == tenantID && h.Status == domain.HITLStatusPending { r = append(r, h) } }; return r, nil }
-func (m *soMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error { m.mu.Lock(); defer m.mu.Unlock(); m.auditEvents = append(m.auditEvents, e); return nil }
-func (m *soMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.AuditEvent; for _, e := range m.auditEvents { if e.TenantID != tenantID { continue }; if targetType != "" && e.TargetType != targetType { continue }; if targetID != "" && e.TargetID != targetID { continue }; r = append(r, e); if limit > 0 && len(r) >= limit { break } }; return r, nil }
-func (m *soMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *soMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *soMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *soMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobs[job.ID] = job
+	return nil
+}
+func (m *soMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	if j.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return j, nil
+}
+func (m *soMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.Job
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
+	return r, nil
+}
+func (m *soMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vendors[v.ID] = v
+	return nil
+}
+func (m *soMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.vendors[id]
+	if !ok || v.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return v, nil
+}
+func (m *soMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *soMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *soMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return d, nil
+}
+func (m *soMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *soMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *soMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return r, nil
+}
+func (m *soMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.HITLRequest
+	for _, h := range m.hitlReqs {
+		if h.TenantID == tenantID && h.Status == domain.HITLStatusPending {
+			r = append(r, h)
+		}
+	}
+	return r, nil
+}
+func (m *soMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *soMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
+}
+func (m *soMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.AuditEvent
+	for _, e := range m.auditEvents {
+		if e.TenantID != tenantID {
+			continue
+		}
+		if targetType != "" && e.TargetType != targetType {
+			continue
+		}
+		if targetID != "" && e.TargetID != targetID {
+			continue
+		}
+		r = append(r, e)
+		if limit > 0 && len(r) >= limit {
+			break
+		}
+	}
+	return r, nil
+}
+func (m *soMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *soMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *soMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 type soMockStorage struct {
 	mu sync.Mutex
 }
-func (m *soMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) { return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil }
-func (m *soMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) { return nil, fmt.Errorf("not impl") }
+
+func (m *soMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) {
+	return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil
+}
+func (m *soMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("not impl")
+}
 func (m *soMockStorage) Delete(_ context.Context, _, _ string) error { return nil }
-func (m *soMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) { return nil, nil }
+func (m *soMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) {
+	return nil, nil
+}
 
 type soMockQueue struct{}
-func (m *soMockQueue) Enqueue(_ context.Context, _ string, _ any) (string, error) { return "msg-1", nil }
-func (m *soMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) { return nil, nil }
+
+func (m *soMockQueue) Enqueue(_ context.Context, _ string, _ any) (string, error) {
+	return "msg-1", nil
+}
+func (m *soMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) {
+	return nil, nil
+}
 func (m *soMockQueue) Delete(_ context.Context, _, _ string) error { return nil }
 func (m *soMockQueue) Poison(_ context.Context, _, _ string) error { return nil }
 
 type soMockLLM struct{}
-func (m *soMockLLM) ExtractFields(_ context.Context, _ string, _ any) (json.RawMessage, float64, error) { return json.RawMessage("{}"), 1.0, nil }
-func (m *soMockLLM) Reason(_ context.Context, prompt string) (string, error) { return "analysis result", nil }
-func (m *soMockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) { return "", nil, nil }
+
+func (m *soMockLLM) ExtractFields(_ context.Context, _ string, _ any) (json.RawMessage, float64, error) {
+	return json.RawMessage("{}"), 1.0, nil
+}
+func (m *soMockLLM) Reason(_ context.Context, prompt string) (string, error) {
+	return "analysis result", nil
+}
+func (m *soMockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) {
+	return "", nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Tests

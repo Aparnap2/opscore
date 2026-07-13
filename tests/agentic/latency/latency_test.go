@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	agentic "github.com/aparna/opscore/tests/agentic"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 	"github.com/aparna/opscore/internal/telemetry"
+	agentic "github.com/aparna/opscore/tests/agentic"
 )
 
 // ---------------------------------------------------------------------------
@@ -83,36 +83,130 @@ type latMockDB struct {
 
 func newLatMockDB() *latMockDB {
 	return &latMockDB{
-		jobs:     make(map[string]*domain.Job),
-		vendors:  make(map[string]*domain.Vendor),
+		jobs:      make(map[string]*domain.Job),
+		vendors:   make(map[string]*domain.Vendor),
 		documents: make(map[string]*domain.Document),
-		hitlReqs: make(map[string]*domain.HITLRequest),
+		hitlReqs:  make(map[string]*domain.HITLRequest),
 	}
 }
 
-func (m *latMockDB) UpsertJob(_ context.Context, job *domain.Job) error { m.mu.Lock(); defer m.mu.Unlock(); m.jobs[job.ID] = job; return nil }
-func (m *latMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); j, ok := m.jobs[id]; if !ok { return nil, fmt.Errorf("not found") }; if j.TenantID != tenantID { return nil, fmt.Errorf("not found") }; return j, nil }
-func (m *latMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.Job; for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }; return r, nil }
-func (m *latMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error { m.mu.Lock(); defer m.mu.Unlock(); m.vendors[v.ID] = v; return nil }
-func (m *latMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) { m.mu.Lock(); defer m.mu.Unlock(); v, ok := m.vendors[id]; if !ok { return nil, fmt.Errorf("not found") }; return v, nil }
-func (m *latMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *latMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *latMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("not found") }; return d, nil }
-func (m *latMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *latMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *latMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("not found") }; return r, nil }
-func (m *latMockDB) ListPendingHITL(_ context.Context, _ string) ([]*domain.HITLRequest, error) { return nil, nil }
-func (m *latMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error { m.mu.Lock(); defer m.mu.Unlock(); m.auditEvents = append(m.auditEvents, e); return nil }
-func (m *latMockDB) ListAuditEvents(_ context.Context, _, _, _ string, _ int) ([]*domain.AuditEvent, error) { return nil, nil }
-func (m *latMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *latMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *latMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *latMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobs[job.ID] = job
+	return nil
+}
+func (m *latMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	if j.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return j, nil
+}
+func (m *latMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.Job
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
+	return r, nil
+}
+func (m *latMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vendors[v.ID] = v
+	return nil
+}
+func (m *latMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.vendors[id]
+	if !ok || v.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return v, nil
+}
+func (m *latMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *latMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *latMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return d, nil
+}
+func (m *latMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *latMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *latMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return r, nil
+}
+func (m *latMockDB) ListPendingHITL(_ context.Context, _ string) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *latMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *latMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
+}
+func (m *latMockDB) ListAuditEvents(_ context.Context, _, _, _ string, _ int) ([]*domain.AuditEvent, error) {
+	return nil, nil
+}
+func (m *latMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *latMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *latMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 type latMockStorage struct{}
-func (m *latMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) { return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil }
-func (m *latMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) { return nil, fmt.Errorf("not impl") }
+
+func (m *latMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) {
+	return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil
+}
+func (m *latMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("not impl")
+}
 func (m *latMockStorage) Delete(_ context.Context, _, _ string) error { return nil }
-func (m *latMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) { return nil, nil }
+func (m *latMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) {
+	return nil, nil
+}
 
 type latMockQueue struct {
 	mu       sync.Mutex
@@ -122,15 +216,19 @@ type latMockQueue struct {
 func newLatMockQueue() *latMockQueue { return &latMockQueue{} }
 
 func (m *latMockQueue) Enqueue(_ context.Context, _ string, msg any) (string, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	body, _ := json.Marshal(msg)
 	id := fmt.Sprintf("msg-%d", len(m.messages))
 	m.messages = append(m.messages, &providers.QueueMessage{ID: id, Body: string(body)})
 	return id, nil
 }
 func (m *latMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
-	if len(m.messages) == 0 { return nil, nil }
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.messages) == 0 {
+		return nil, nil
+	}
 	msg := m.messages[0]
 	m.messages = m.messages[1:]
 	return msg, nil
@@ -139,9 +237,14 @@ func (m *latMockQueue) Delete(_ context.Context, _, _ string) error { return nil
 func (m *latMockQueue) Poison(_ context.Context, _, _ string) error { return nil }
 
 type latMockLLM struct{}
-func (m *latMockLLM) ExtractFields(_ context.Context, _ string, _ any) (json.RawMessage, float64, error) { return json.RawMessage("{}"), 1.0, nil }
+
+func (m *latMockLLM) ExtractFields(_ context.Context, _ string, _ any) (json.RawMessage, float64, error) {
+	return json.RawMessage("{}"), 1.0, nil
+}
 func (m *latMockLLM) Reason(_ context.Context, _ string) (string, error) { return "analysis", nil }
-func (m *latMockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) { return "", nil, nil }
+func (m *latMockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) {
+	return "", nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -226,8 +329,6 @@ func TestLatency_DocumentAgent_HITLPath(t *testing.T) {
 	validator := domain.NewIndiaValidator()
 	tracer := &telemetry.NoopTracer{}
 	agent := agents.NewDocumentAgent(storage, queue, db, ocr, validator, tracer)
-
-
 
 	var metrics WorkflowMetrics
 	for i := 0; i < 3; i++ {
@@ -334,7 +435,7 @@ func TestLatency_EndToEndWorkflow(t *testing.T) {
 	llm := &latMockLLM{}
 	db := newLatMockDB()
 	storage := &latMockStorage{}
-	queue := 	newLatMockQueue()
+	queue := newLatMockQueue()
 	validator := domain.NewIndiaValidator()
 	tracer := &telemetry.NoopTracer{}
 
@@ -347,7 +448,7 @@ func TestLatency_EndToEndWorkflow(t *testing.T) {
 	// Document processing
 	docJob := &agents.DocumentJob{
 		TenantID: "tenant-lat-5", JobID: "lat-e2e-doc",
-		BlobURL: "http://example.com/confidence_0.95/invoice.pdf",
+		BlobURL:  "http://example.com/confidence_0.95/invoice.pdf",
 		FileName: "invoice.pdf",
 	}
 	start := time.Now()
@@ -361,7 +462,7 @@ func TestLatency_EndToEndWorkflow(t *testing.T) {
 	vendorJob := &agents.VendorJob{
 		TenantID: "tenant-lat-5", JobID: "lat-e2e-vendor",
 		VendorData: &agents.VendorData{
-			Name: "E2E Vendor",
+			Name:      "E2E Vendor",
 			GSTNumber: "22AAAAA0000A1Z5",
 		},
 	}

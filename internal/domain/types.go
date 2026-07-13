@@ -7,11 +7,11 @@ import (
 type TrustTier string
 
 const (
-	TrustTierProbation  TrustTier = "PROBATION"
-	TrustTierStandard   TrustTier = "STANDARD"
-	TrustTierPreferred  TrustTier = "PREFERRED"
-	TrustTierStrategic  TrustTier = "STRATEGIC"
-	TrustTierBlocked    TrustTier = "BLOCKED"
+	TrustTierProbation TrustTier = "PROBATION"
+	TrustTierStandard  TrustTier = "STANDARD"
+	TrustTierPreferred TrustTier = "PREFERRED"
+	TrustTierStrategic TrustTier = "STRATEGIC"
+	TrustTierBlocked   TrustTier = "BLOCKED"
 )
 
 type RiskTier string
@@ -45,7 +45,7 @@ const (
 	JobStatusQueued          JobStatus = "QUEUED"
 	JobStatusProcessing      JobStatus = "PROCESSING"
 	JobStatusCompleted       JobStatus = "COMPLETED"
-	JobStatusFailed          JobStatus = "FAILED"            // legacy - treat as terminal
+	JobStatusFailed          JobStatus = "FAILED"           // legacy - treat as terminal
 	JobStatusRetryableFailed JobStatus = "RETRYABLE_FAILED" // can retry
 	JobStatusTerminalFailed  JobStatus = "TERMINAL_FAILED"  // won't retry
 	JobStatusDeadLettered    JobStatus = "DEAD_LETTERED"    // exceeded max retries
@@ -104,13 +104,13 @@ type Job struct {
 	ParentBatchID string `json:"parent_batch_id,omitempty"` // for child jobs
 	IsChildJob    bool   `json:"is_child_job,omitempty"`
 	// PRD v4.0 fields
-	BlobURL       string      `json:"blob_url,omitempty"`
-	DocumentType  string      `json:"document_type,omitempty"`
-	Confidence    float64     `json:"confidence,omitempty"`
-	Extracted     interface{} `json:"extracted_data,omitempty"`
-	RiskFlags     []string    `json:"risk_flags,omitempty"`
-	HITLReason    string      `json:"hitl_reason,omitempty"`
-	Version       int         `json:"version"`
+	BlobURL      string      `json:"blob_url,omitempty"`
+	DocumentType string      `json:"document_type,omitempty"`
+	Confidence   float64     `json:"confidence,omitempty"`
+	Extracted    interface{} `json:"extracted_data,omitempty"`
+	RiskFlags    []string    `json:"risk_flags,omitempty"`
+	HITLReason   string      `json:"hitl_reason,omitempty"`
+	Version      int         `json:"version"`
 }
 
 // ComplianceChunk represents a chunk of a document for compliance processing
@@ -152,8 +152,8 @@ type Vendor struct {
 	RiskScore    int          `json:"risk_score"`
 	Approved     bool         `json:"approved"`
 	// PRD v4.0 fields
-	RiskFlags          []string   `json:"risk_flags,omitempty"`
-	Status             string     `json:"status,omitempty"`
+	RiskFlags         []string   `json:"risk_flags,omitempty"`
+	Status            string     `json:"status,omitempty"`
 	LastTransactionAt *time.Time `json:"last_transaction_at,omitempty"`
 }
 
@@ -171,14 +171,14 @@ type Document struct {
 }
 
 type HITLRequest struct {
-	ID           string            `json:"id"`
-	TenantID     string            `json:"tenant_id"`
-	JobID        string            `json:"job_id"`
-	Reason       string            `json:"reason"`
-	Status       HITLRequestStatus `json:"status"`
-	SentAt       time.Time         `json:"sent_at"`
-	RespondedAt *time.Time         `json:"responded_at,omitempty"`
-	Responder    string            `json:"responder,omitempty"`
-	Decision     string            `json:"decision,omitempty"`
-	SlackTS      string            `json:"slack_ts,omitempty"`
+	ID          string            `json:"id"`
+	TenantID    string            `json:"tenant_id"`
+	JobID       string            `json:"job_id"`
+	Reason      string            `json:"reason"`
+	Status      HITLRequestStatus `json:"status"`
+	SentAt      time.Time         `json:"sent_at"`
+	RespondedAt *time.Time        `json:"responded_at,omitempty"`
+	Responder   string            `json:"responder,omitempty"`
+	Decision    string            `json:"decision,omitempty"`
+	SlackTS     string            `json:"slack_ts,omitempty"`
 }

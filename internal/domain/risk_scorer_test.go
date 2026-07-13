@@ -31,7 +31,7 @@ func TestValidateGST(t *testing.T) {
 func TestValidatePAN(t *testing.T) {
 	tests := []struct {
 		name  string
-		pan  string
+		pan   string
 		valid bool
 	}{
 		{"valid PAN", "AABCS1209D", true},
@@ -55,7 +55,7 @@ func TestValidatePAN(t *testing.T) {
 func TestValidateIFSC(t *testing.T) {
 	tests := []struct {
 		name  string
-		ifsc string
+		ifsc  string
 		valid bool
 	}{
 		{"valid IFSC", "HDFC0CGBIBL", true},
@@ -88,13 +88,13 @@ func TestComputeVendorRisk(t *testing.T) {
 	// - Clamp between 0-100
 	// - Tier: >=70 = LOW, >=40 = MEDIUM, <40 = HIGH
 	tests := []struct {
-		name          string
+		name         string
 		vendor       *Vendor
-		existing    []*Vendor
-		blacklist   []string
-		tenantID    string
-		wantScore   int
-		wantTier    RiskTier
+		existing     []*Vendor
+		blacklist    []string
+		tenantID     string
+		wantScore    int
+		wantTier     RiskTier
 		wantMinFlags int
 	}{
 		{
@@ -109,85 +109,85 @@ func TestComputeVendorRisk(t *testing.T) {
 				TenantID:    "t1",
 				Approved:    true, // No dispute flag
 			},
-			existing:  []*Vendor{},
-			blacklist: []string{},
-			tenantID:  "t1",
-			wantScore: 85, // 50 + 15 (GST) + 10 (PAN) + 10 (IFSC)
-			wantTier:  RiskTierLow, // >= 70
-			wantMinFlags: 3, // VALID_GST, VALID_PAN, VALID_IFSC
+			existing:     []*Vendor{},
+			blacklist:    []string{},
+			tenantID:     "t1",
+			wantScore:    85,          // 50 + 15 (GST) + 10 (PAN) + 10 (IFSC)
+			wantTier:     RiskTierLow, // >= 70
+			wantMinFlags: 3,           // VALID_GST, VALID_PAN, VALID_IFSC
 		},
 		{
 			name: "invalid GST - incomplete docs",
 			vendor: &Vendor{
-				ID:       "v2",
-				Name:     "Bad GST Corp",
+				ID:        "v2",
+				Name:      "Bad GST Corp",
 				GSTNumber: "INVALID",
-				TenantID: "t1",
-				Approved: true,
+				TenantID:  "t1",
+				Approved:  true,
 			},
-			existing:  []*Vendor{},
-			blacklist: []string{},
-			tenantID:  "t1",
-			wantScore: 35, // 50 - 15 (incomplete: no PAN or no GST)
-			wantTier:  RiskTierHigh, // < 40
-			wantMinFlags: 1, // INCOMPLETE_DOCUMENTS
+			existing:     []*Vendor{},
+			blacklist:    []string{},
+			tenantID:     "t1",
+			wantScore:    35,           // 50 - 15 (incomplete: no PAN or no GST)
+			wantTier:     RiskTierHigh, // < 40
+			wantMinFlags: 1,            // INCOMPLETE_DOCUMENTS
 		},
 		{
 			name: "invalid PAN and IFSC - no GST",
 			vendor: &Vendor{
-				ID:       "v3",
-				Name:     "Multiple Errors",
+				ID:        "v3",
+				Name:      "Multiple Errors",
 				PANNumber: "BADPAN",
 				IFSCCode:  "1234",
 				TenantID:  "t1",
 				Approved:  true,
 			},
-			existing:  []*Vendor{},
-			blacklist: []string{},
-			tenantID:  "t1",
-			wantScore: 35, // 50 - 15 (incomplete: no PAN or no GST)
-			wantTier:  RiskTierHigh, // < 40
-			wantMinFlags: 1, // INCOMPLETE_DOCUMENTS
+			existing:     []*Vendor{},
+			blacklist:    []string{},
+			tenantID:     "t1",
+			wantScore:    35,           // 50 - 15 (incomplete: no PAN or no GST)
+			wantTier:     RiskTierHigh, // < 40
+			wantMinFlags: 1,            // INCOMPLETE_DOCUMENTS
 		},
-{
+		{
 			name: "duplicate GST in system",
 			vendor: &Vendor{
-				ID:          "v4",
-				Name:        "Duplicate GST Corp",
-				GSTNumber:   "27AABCS1209D1Z5",
-				TenantID:    "t1",
-				Approved:    true, // No dispute flag
+				ID:        "v4",
+				Name:      "Duplicate GST Corp",
+				GSTNumber: "27AABCS1209D1Z5",
+				TenantID:  "t1",
+				Approved:  true, // No dispute flag
 			},
 			existing: []*Vendor{
 				{
-					ID:          "existing1",
-					Name:        "Existing Corp",
-					GSTNumber:   "27AABCS1209D1Z5", // Same GST
-					TenantID:    "t1",
+					ID:        "existing1",
+					Name:      "Existing Corp",
+					GSTNumber: "27AABCS1209D1Z5", // Same GST
+					TenantID:  "t1",
 				},
 			},
-			blacklist: []string{},
-			tenantID:  "t1",
-			wantScore: 25, // 50 + 15 (valid GST) - 40 (duplicate GST)
-			wantTier:  RiskTierHigh, // < 40
-			wantMinFlags: 2, // VALID_GST, DUPLICATE_GST
-},
- 		{
- 			name: "vendor not approved (dispute flag)",
+			blacklist:    []string{},
+			tenantID:     "t1",
+			wantScore:    25,           // 50 + 15 (valid GST) - 40 (duplicate GST)
+			wantTier:     RiskTierHigh, // < 40
+			wantMinFlags: 2,            // VALID_GST, DUPLICATE_GST
+		},
+		{
+			name: "vendor not approved (dispute flag)",
 			vendor: &Vendor{
-				ID:          "v5",
-				Name:        "Disputed Vendor",
-				GSTNumber:   "27AABCS1209D1Z5",
-				PANNumber:   "AABCS1209D",
-				TenantID:    "t1",
-				Approved:    false, // Not approved = dispute flag
+				ID:        "v5",
+				Name:      "Disputed Vendor",
+				GSTNumber: "27AABCS1209D1Z5",
+				PANNumber: "AABCS1209D",
+				TenantID:  "t1",
+				Approved:  false, // Not approved = dispute flag
 			},
-			existing:  []*Vendor{},
-			blacklist: []string{},
-			tenantID:  "t1",
-			wantScore: 55, // 50 + 15 (GST) + 10 (PAN) - 20 (not approved)
-			wantTier:  RiskTierMedium, // >= 40
-			wantMinFlags: 3, // VALID_GST, VALID_PAN, NOT_APPROVED
+			existing:     []*Vendor{},
+			blacklist:    []string{},
+			tenantID:     "t1",
+			wantScore:    55,             // 50 + 15 (GST) + 10 (PAN) - 20 (not approved)
+			wantTier:     RiskTierMedium, // >= 40
+			wantMinFlags: 3,              // VALID_GST, VALID_PAN, NOT_APPROVED
 		},
 		{
 			name: "HIGH risk - multiple issues",
@@ -201,12 +201,12 @@ func TestComputeVendorRisk(t *testing.T) {
 				TenantID:    "t1",
 				Approved:    false,
 			},
-			existing:  []*Vendor{},
-			blacklist: []string{},
-			tenantID:  "t1",
-			wantScore: 15, // 50 - 20 (not approved) - 15 (incomplete)
-			wantTier:  RiskTierHigh, // < 40
-			wantMinFlags: 2, // NOT_APPROVED, INCOMPLETE_DOCUMENTS
+			existing:     []*Vendor{},
+			blacklist:    []string{},
+			tenantID:     "t1",
+			wantScore:    15,           // 50 - 20 (not approved) - 15 (incomplete)
+			wantTier:     RiskTierHigh, // < 40
+			wantMinFlags: 2,            // NOT_APPROVED, INCOMPLETE_DOCUMENTS
 		},
 	}
 

@@ -37,18 +37,18 @@ func NewVendorAgent(
 // VendorJob represents a vendor onboarding job
 type VendorJob struct {
 	VendorData *VendorData `json:"vendor_data"`
-	TenantID  string      `json:"tenant_id"`
-	JobID    string      `json:"job_id"`
+	TenantID   string      `json:"tenant_id"`
+	JobID      string      `json:"job_id"`
 }
 
 type VendorData struct {
 	Name        string   `json:"name"`
-	GSTNumber    string   `json:"gst_number,omitempty"`
+	GSTNumber   string   `json:"gst_number,omitempty"`
 	PANNumber   string   `json:"pan_number,omitempty"`
 	IFSCCode    string   `json:"ifsc_code,omitempty"`
 	BankAccount string   `json:"bank_account,omitempty"`
-	Address    string   `json:"address,omitempty"`
-	Documents  []string `json:"documents,omitempty"`
+	Address     string   `json:"address,omitempty"`
+	Documents   []string `json:"documents,omitempty"`
 }
 
 // ProcessVendor handles the complete vendor onboarding workflow

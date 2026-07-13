@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	agentic "github.com/aparna/opscore/tests/agentic"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 	"github.com/aparna/opscore/internal/telemetry"
+	agentic "github.com/aparna/opscore/tests/agentic"
 )
 
 // ---------------------------------------------------------------------------
@@ -31,36 +31,156 @@ type lrMockDB struct {
 
 func newLRMockDB() *lrMockDB {
 	return &lrMockDB{
-		jobs:     make(map[string]*domain.Job),
-		vendors:  make(map[string]*domain.Vendor),
+		jobs:      make(map[string]*domain.Job),
+		vendors:   make(map[string]*domain.Vendor),
 		documents: make(map[string]*domain.Document),
-		hitlReqs: make(map[string]*domain.HITLRequest),
+		hitlReqs:  make(map[string]*domain.HITLRequest),
 	}
 }
 
-func (m *lrMockDB) UpsertJob(_ context.Context, job *domain.Job) error { m.mu.Lock(); defer m.mu.Unlock(); m.jobs[job.ID] = job; return nil }
-func (m *lrMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); j, ok := m.jobs[id]; if !ok { return nil, fmt.Errorf("not found") }; if j.TenantID != tenantID { return nil, fmt.Errorf("not found") }; return j, nil }
-func (m *lrMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.Job; for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }; return r, nil }
-func (m *lrMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error { m.mu.Lock(); defer m.mu.Unlock(); m.vendors[v.ID] = v; return nil }
-func (m *lrMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) { m.mu.Lock(); defer m.mu.Unlock(); v, ok := m.vendors[id]; if !ok { return nil, fmt.Errorf("not found") }; return v, nil }
-func (m *lrMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *lrMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *lrMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("not found") }; return d, nil }
-func (m *lrMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *lrMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *lrMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("not found") }; return r, nil }
-func (m *lrMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.HITLRequest; for _, h := range m.hitlReqs { if h.TenantID == tenantID && h.Status == domain.HITLStatusPending { r = append(r, h) } }; return r, nil }
-func (m *lrMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error { m.mu.Lock(); defer m.mu.Unlock(); m.auditEvents = append(m.auditEvents, e); return nil }
-func (m *lrMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.AuditEvent; for _, e := range m.auditEvents { if e.TenantID != tenantID { continue }; if targetType != "" && e.TargetType != targetType { continue }; if targetID != "" && e.TargetID != targetID { continue }; r = append(r, e); if limit > 0 && len(r) >= limit { break } }; return r, nil }
-func (m *lrMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *lrMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *lrMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *lrMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobs[job.ID] = job
+	return nil
+}
+func (m *lrMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	if j.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return j, nil
+}
+func (m *lrMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.Job
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
+	return r, nil
+}
+func (m *lrMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vendors[v.ID] = v
+	return nil
+}
+func (m *lrMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.vendors[id]
+	if !ok || v.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return v, nil
+}
+func (m *lrMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *lrMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *lrMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return d, nil
+}
+func (m *lrMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *lrMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *lrMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return r, nil
+}
+func (m *lrMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.HITLRequest
+	for _, h := range m.hitlReqs {
+		if h.TenantID == tenantID && h.Status == domain.HITLStatusPending {
+			r = append(r, h)
+		}
+	}
+	return r, nil
+}
+func (m *lrMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *lrMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
+}
+func (m *lrMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.AuditEvent
+	for _, e := range m.auditEvents {
+		if e.TenantID != tenantID {
+			continue
+		}
+		if targetType != "" && e.TargetType != targetType {
+			continue
+		}
+		if targetID != "" && e.TargetID != targetID {
+			continue
+		}
+		r = append(r, e)
+		if limit > 0 && len(r) >= limit {
+			break
+		}
+	}
+	return r, nil
+}
+func (m *lrMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *lrMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *lrMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 type lrMockStorage struct{}
-func (m *lrMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) { return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil }
-func (m *lrMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) { return nil, fmt.Errorf("not impl") }
+
+func (m *lrMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) {
+	return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil
+}
+func (m *lrMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("not impl")
+}
 func (m *lrMockStorage) Delete(_ context.Context, _, _ string) error { return nil }
-func (m *lrMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) { return nil, nil }
+func (m *lrMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) {
+	return nil, nil
+}
 
 type lrMockQueue struct {
 	mu       sync.Mutex
@@ -73,22 +193,27 @@ func newLRMockQueue() *lrMockQueue {
 }
 
 func (m *lrMockQueue) Enqueue(_ context.Context, _ string, msg any) (string, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	body, _ := json.Marshal(msg)
 	id := fmt.Sprintf("msg-%d", len(m.messages))
 	m.messages = append(m.messages, &providers.QueueMessage{ID: id, Body: string(body)})
 	return id, nil
 }
 func (m *lrMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
-	if len(m.messages) == 0 { return nil, nil }
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.messages) == 0 {
+		return nil, nil
+	}
 	msg := m.messages[0]
 	m.messages = m.messages[1:]
 	return msg, nil
 }
 func (m *lrMockQueue) Delete(_ context.Context, _, _ string) error { return nil }
 func (m *lrMockQueue) Poison(_ context.Context, _, msgID string) error {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.dlq = append(m.dlq, &providers.QueueMessage{ID: msgID})
 	return nil
 }
@@ -237,7 +362,7 @@ func TestWorkflow_DelayedCallback_HandledGracefully(t *testing.T) {
 		t.Errorf("final status = %s, want COMPLETED", finalJob.Status)
 	}
 
-	finalHITL, _ := db.GetHITLRequest(ctx, "lr-lr-delay-1")
+	finalHITL, _ := db.GetHITLRequest(ctx, "lr-lr-delay-1", "tenant-lr-3")
 	if finalHITL != nil && finalHITL.Status != domain.HITLStatusApproved {
 		t.Errorf("HITL status = %s, want APPROVED", finalHITL.Status)
 	}
@@ -254,7 +379,7 @@ func TestWorkflow_QueueRedriveFromDLQ(t *testing.T) {
 	// Enqueue a job
 	job := &agents.DocumentJob{
 		TenantID: "tenant-lr-4", JobID: "lr-dlq-1",
-		BlobURL: "http://example.com/confidence_0.95/doc.pdf",
+		BlobURL:  "http://example.com/confidence_0.95/doc.pdf",
 		FileName: "invoice.pdf",
 	}
 	_, err := queue.Enqueue(ctx, "doc-queue", job)
@@ -389,7 +514,7 @@ func TestWorkflow_MaxRetriesExceeded_MovesToDLQ(t *testing.T) {
 	// Enqueue 3 jobs to simulate 3 retry attempts
 	job := &agents.DocumentJob{
 		TenantID: "tenant-lr-7", JobID: "lr-maxretry-1",
-		BlobURL: "http://example.com/trigger_error/doc.pdf",
+		BlobURL:  "http://example.com/trigger_error/doc.pdf",
 		FileName: "broken.pdf",
 	}
 	for i := 0; i < 3; i++ {

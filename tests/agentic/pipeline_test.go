@@ -312,8 +312,8 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 	// ---- Create components ----
 	tracer := telemetry.NoopTracer{}
 	validator := domain.NewIndiaValidator()
-	stubOCR := &StubOCR{}     // from stubs.go — use confidence_0.45 trigger
-	stubLLM := &StubLLM{}     // from stubs.go — not critical for doc path
+	stubOCR := &StubOCR{} // from stubs.go — use confidence_0.45 trigger
+	stubLLM := &StubLLM{} // from stubs.go — not critical for doc path
 	slack := nilSlackProvider{}
 
 	// StubDB wraps the real Postgres adapter to track created jobs/HITL for assertions
@@ -435,7 +435,7 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 	// The nilSlackProvider returns nil from SendApprovalRequest, so the worker
 	// proceeds to UpsertHITLRequest
 	var hitlReq *domain.HITLRequest
-	hitlReq, err = infra.DB.GetHITLRequest(ctx, "hitl-"+jobID)
+	hitlReq, err = infra.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
 	if err != nil {
 		// The HITL request might be created by the DocumentAgent in some code paths
 		// Check via the StubDB tracking
@@ -466,7 +466,7 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 	t.Logf("HITL request approved: status=%s, responder=%s", hitlReq.Status, hitlReq.Responder)
 
 	// Verify it was updated
-	approvedHITL, err := infra.DB.GetHITLRequest(ctx, hitlReq.ID)
+	approvedHITL, err := infra.DB.GetHITLRequest(ctx, hitlReq.ID, hitlReq.TenantID)
 	if err != nil {
 		t.Fatalf("GetHITLRequest after approval failed: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestPipeline_FullTrajectory(t *testing.T) {
 	}
 
 	// Verify the document was stored in DB
-	savedDoc, err := infra.DB.GetDocument(ctx, doc.ID)
+	savedDoc, err := infra.DB.GetDocument(ctx, doc.ID, tenantID)
 	if err != nil {
 		t.Fatalf("GetDocument failed: %v", err)
 	}

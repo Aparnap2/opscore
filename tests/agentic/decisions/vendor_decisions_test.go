@@ -28,67 +28,161 @@ type vendorMockDB struct {
 
 func newVendorMockDB() *vendorMockDB {
 	return &vendorMockDB{
-		jobs:     make(map[string]*domain.Job),
-		vendors:  make(map[string]*domain.Vendor),
+		jobs:      make(map[string]*domain.Job),
+		vendors:   make(map[string]*domain.Vendor),
 		documents: make(map[string]*domain.Document),
-		hitlReqs: make(map[string]*domain.HITLRequest),
+		hitlReqs:  make(map[string]*domain.HITLRequest),
 	}
 }
 
 func (m *vendorMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	existing, exists := m.jobs[job.ID]
-	if exists { job.Version = existing.Version + 1 }
+	if exists {
+		job.Version = existing.Version + 1
+	}
 	m.jobs[job.ID] = job
 	return nil
 }
 func (m *vendorMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	j, ok := m.jobs[id]
-	if !ok { return nil, fmt.Errorf("job not found") }
-	if j.TenantID != tenantID { return nil, fmt.Errorf("job not found") }
+	if !ok {
+		return nil, fmt.Errorf("job not found")
+	}
+	if j.TenantID != tenantID {
+		return nil, fmt.Errorf("job not found")
+	}
 	return j, nil
 }
 func (m *vendorMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var r []*domain.Job
-	for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
 	return r, nil
 }
 func (m *vendorMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.vendors[v.ID] = v
 	return nil
 }
-func (m *vendorMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+func (m *vendorMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	v, ok := m.vendors[id]
-	if !ok { return nil, fmt.Errorf("vendor not found") }
+	if !ok || v.TenantID != tenantID {
+		return nil, fmt.Errorf("vendor not found")
+	}
 	return v, nil
 }
 func (m *vendorMockDB) ListVendors(_ context.Context, tenantID string) ([]*domain.Vendor, error) {
-	m.mu.Lock(); defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var r []*domain.Vendor
-	for _, v := range m.vendors { if v.TenantID == tenantID { r = append(r, v) } }
+	for _, v := range m.vendors {
+		if v.TenantID == tenantID {
+			r = append(r, v)
+		}
+	}
 	return r, nil
 }
-func (m *vendorMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *vendorMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("doc not found") }; return d, nil }
-func (m *vendorMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *vendorMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *vendorMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("HITL not found") }; return r, nil }
-func (m *vendorMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.HITLRequest; for _, h := range m.hitlReqs { if h.TenantID == tenantID && h.Status == domain.HITLStatusPending { r = append(r, h) } }; return r, nil }
-func (m *vendorMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error { m.mu.Lock(); defer m.mu.Unlock(); m.auditEvents = append(m.auditEvents, e); return nil }
-func (m *vendorMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.AuditEvent; for _, e := range m.auditEvents { if e.TenantID != tenantID { continue }; if targetType != "" && e.TargetType != targetType { continue }; if targetID != "" && e.TargetID != targetID { continue }; r = append(r, e); if limit > 0 && len(r) >= limit { break } }; return r, nil }
-func (m *vendorMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *vendorMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *vendorMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *vendorMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *vendorMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("document not found")
+	}
+	return d, nil
+}
+func (m *vendorMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *vendorMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("HITL not found")
+	}
+	return r, nil
+}
+func (m *vendorMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.HITLRequest
+	for _, h := range m.hitlReqs {
+		if h.TenantID == tenantID && h.Status == domain.HITLStatusPending {
+			r = append(r, h)
+		}
+	}
+	return r, nil
+}
+func (m *vendorMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
+}
+func (m *vendorMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.AuditEvent
+	for _, e := range m.auditEvents {
+		if e.TenantID != tenantID {
+			continue
+		}
+		if targetType != "" && e.TargetType != targetType {
+			continue
+		}
+		if targetID != "" && e.TargetID != targetID {
+			continue
+		}
+		r = append(r, e)
+		if limit > 0 && len(r) >= limit {
+			break
+		}
+	}
+	return r, nil
+}
+func (m *vendorMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 // vendorMockLLM implements providers.LLMProvider with configurable responses.
 type vendorMockLLM struct {
-	mu          sync.Mutex
-	reasonFunc  func(ctx context.Context, prompt string) (string, error)
-	callCount   int
+	mu         sync.Mutex
+	reasonFunc func(ctx context.Context, prompt string) (string, error)
+	callCount  int
 }
 
 func newVendorMockLLM() *vendorMockLLM {
@@ -155,7 +249,7 @@ func TestVendorAgent_AllValidIDs_RiskScore65_NeedsHITL(t *testing.T) {
 		t.Errorf("needs_hitl = false, want true (risk 65 >= 60)")
 	}
 	// HITL request should exist
-	_, hitlErr := db.GetHITLRequest(context.Background(), "hitl-vdec-test-1")
+	_, hitlErr := db.GetHITLRequest(context.Background(), "hitl-vdec-test-1", "tenant-vdec-1")
 	if hitlErr != nil {
 		t.Errorf("expected HITL request, got error: %v", hitlErr)
 	}
@@ -194,7 +288,7 @@ func TestVendorAgent_EmptyAllIDs_RiskScore15_AutoApproved(t *testing.T) {
 		t.Errorf("trust_tier = %v, want PREFERRED", result["trust_tier"])
 	}
 	// Vendor should be auto-approved
-	vendor, err := db.GetVendor(context.Background(), "vdec-test-2")
+	vendor, err := db.GetVendor(context.Background(), "vdec-test-2", "tenant-vdec-2")
 	if err != nil {
 		t.Fatalf("GetVendor failed: %v", err)
 	}
@@ -241,7 +335,7 @@ func TestVendorAgent_InvalidIDs_ValidationErrors_TriggersHITL(t *testing.T) {
 		t.Errorf("needs_hitl = false, want true (validation errors present)")
 	}
 	// HITL request should exist
-	hitlReq, err := db.GetHITLRequest(context.Background(), "hitl-vdec-test-3")
+	hitlReq, err := db.GetHITLRequest(context.Background(), "hitl-vdec-test-3", "tenant-vdec-3")
 	if err != nil {
 		t.Fatalf("expected HITL request: %v", err)
 	}
@@ -317,7 +411,7 @@ func TestVendorAgent_LLMFailure_DoesNotCrash_SavesVendor(t *testing.T) {
 		t.Error("llm_analysis should be absent when LLM fails")
 	}
 	// Vendor should still be saved
-	vendor, err := db.GetVendor(context.Background(), "vdec-test-5")
+	vendor, err := db.GetVendor(context.Background(), "vdec-test-5", "tenant-vdec-5")
 	if err != nil {
 		t.Fatalf("vendor should be saved despite LLM error: %v", err)
 	}

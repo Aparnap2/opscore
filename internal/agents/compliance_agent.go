@@ -26,13 +26,13 @@ type ComplianceAgent struct {
 type ComplianceJob struct {
 	TenantID      string           `json:"tenant_id"`
 	JobID         string           `json:"job_id"`
-	SourceName   string           `json:"source_name,omitempty"`
-	SourceURL    string           `json:"source_url,omitempty"`
-	BlobURL      string           `json:"blob_url,omitempty"`
-	Content      string           `json:"content,omitempty"`
-	JobType      string           `json:"job_type"`
-	CorrelationID string         `json:"correlation_id,omitempty"`
-	Items        []ComplianceItem `json:"items,omitempty"`
+	SourceName    string           `json:"source_name,omitempty"`
+	SourceURL     string           `json:"source_url,omitempty"`
+	BlobURL       string           `json:"blob_url,omitempty"`
+	Content       string           `json:"content,omitempty"`
+	JobType       string           `json:"job_type"`
+	CorrelationID string           `json:"correlation_id,omitempty"`
+	Items         []ComplianceItem `json:"items,omitempty"`
 }
 
 // ComplianceItem represents a compliance update item

@@ -168,4 +168,3 @@ func TestPubSubAdapter_Enqueue_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-

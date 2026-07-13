@@ -8,11 +8,11 @@ import (
 	"sync"
 	"testing"
 
-	agentic "github.com/aparna/opscore/tests/agentic"
 	"github.com/aparna/opscore/internal/agents"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 	"github.com/aparna/opscore/internal/telemetry"
+	agentic "github.com/aparna/opscore/tests/agentic"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,47 +30,161 @@ type goldMockDB struct {
 
 func newGoldMockDB() *goldMockDB {
 	return &goldMockDB{
-		jobs:     make(map[string]*domain.Job),
-		vendors:  make(map[string]*domain.Vendor),
+		jobs:      make(map[string]*domain.Job),
+		vendors:   make(map[string]*domain.Vendor),
 		documents: make(map[string]*domain.Document),
-		hitlReqs: make(map[string]*domain.HITLRequest),
+		hitlReqs:  make(map[string]*domain.HITLRequest),
 	}
 }
 
-func (m *goldMockDB) UpsertJob(_ context.Context, job *domain.Job) error { m.mu.Lock(); defer m.mu.Unlock(); m.jobs[job.ID] = job; return nil }
-func (m *goldMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); j, ok := m.jobs[id]; if !ok { return nil, fmt.Errorf("not found") }; if j.TenantID != tenantID { return nil, fmt.Errorf("not found") }; return j, nil }
-func (m *goldMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.Job; for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }; return r, nil }
-func (m *goldMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error { m.mu.Lock(); defer m.mu.Unlock(); m.vendors[v.ID] = v; return nil }
-func (m *goldMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) { m.mu.Lock(); defer m.mu.Unlock(); v, ok := m.vendors[id]; if !ok { return nil, fmt.Errorf("not found") }; return v, nil }
-func (m *goldMockDB) ListVendors(_ context.Context, tenantID string) ([]*domain.Vendor, error) { m.mu.Lock(); defer m.mu.Unlock(); var r []*domain.Vendor; for _, v := range m.vendors { if v.TenantID == tenantID { r = append(r, v) } }; return r, nil }
-func (m *goldMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *goldMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("not found") }; return d, nil }
-func (m *goldMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *goldMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *goldMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("not found") }; return r, nil }
-func (m *goldMockDB) ListPendingHITL(_ context.Context, _ string) ([]*domain.HITLRequest, error) { return nil, nil }
-func (m *goldMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error { m.mu.Lock(); defer m.mu.Unlock(); m.auditEvents = append(m.auditEvents, e); return nil }
-func (m *goldMockDB) ListAuditEvents(_ context.Context, _, _, _ string, _ int) ([]*domain.AuditEvent, error) { return nil, nil }
-func (m *goldMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *goldMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *goldMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *goldMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobs[job.ID] = job
+	return nil
+}
+func (m *goldMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	if j.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return j, nil
+}
+func (m *goldMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.Job
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
+	return r, nil
+}
+func (m *goldMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vendors[v.ID] = v
+	return nil
+}
+func (m *goldMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.vendors[id]
+	if !ok || v.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return v, nil
+}
+func (m *goldMockDB) ListVendors(_ context.Context, tenantID string) ([]*domain.Vendor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var r []*domain.Vendor
+	for _, v := range m.vendors {
+		if v.TenantID == tenantID {
+			r = append(r, v)
+		}
+	}
+	return r, nil
+}
+func (m *goldMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *goldMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return d, nil
+}
+func (m *goldMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *goldMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *goldMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return r, nil
+}
+func (m *goldMockDB) ListPendingHITL(_ context.Context, _ string) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *goldMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *goldMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
+}
+func (m *goldMockDB) ListAuditEvents(_ context.Context, _, _, _ string, _ int) ([]*domain.AuditEvent, error) {
+	return nil, nil
+}
+func (m *goldMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *goldMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *goldMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 type goldMockStorage struct{}
-func (m *goldMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) { return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil }
-func (m *goldMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) { return nil, fmt.Errorf("not impl") }
+
+func (m *goldMockStorage) Upload(_ context.Context, container, key string, _ io.Reader, _ string) (string, error) {
+	return fmt.Sprintf("https://storage.local/%s/%s", container, key), nil
+}
+func (m *goldMockStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("not impl")
+}
 func (m *goldMockStorage) Delete(_ context.Context, _, _ string) error { return nil }
-func (m *goldMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) { return nil, nil }
+func (m *goldMockStorage) List(_ context.Context, _, _ string) ([]providers.BlobItem, error) {
+	return nil, nil
+}
 
 type goldMockQueue struct{}
-func (m *goldMockQueue) Enqueue(_ context.Context, _ string, _ any) (string, error) { return "msg-1", nil }
-func (m *goldMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) { return nil, nil }
+
+func (m *goldMockQueue) Enqueue(_ context.Context, _ string, _ any) (string, error) {
+	return "msg-1", nil
+}
+func (m *goldMockQueue) Dequeue(_ context.Context, _ string) (*providers.QueueMessage, error) {
+	return nil, nil
+}
 func (m *goldMockQueue) Delete(_ context.Context, _, _ string) error { return nil }
 func (m *goldMockQueue) Poison(_ context.Context, _, _ string) error { return nil }
 
 type goldMockLLM struct{}
-func (m *goldMockLLM) ExtractFields(_ context.Context, _ string, _ any) (json.RawMessage, float64, error) { return json.RawMessage("{}"), 1.0, nil }
-func (m *goldMockLLM) Reason(_ context.Context, prompt string) (string, error) { return "golden analysis", nil }
-func (m *goldMockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) { return "", nil, nil }
+
+func (m *goldMockLLM) ExtractFields(_ context.Context, _ string, _ any) (json.RawMessage, float64, error) {
+	return json.RawMessage("{}"), 1.0, nil
+}
+func (m *goldMockLLM) Reason(_ context.Context, prompt string) (string, error) {
+	return "golden analysis", nil
+}
+func (m *goldMockLLM) Chat(_ context.Context, _ []providers.ChatMessage) (string, *json.RawMessage, error) {
+	return "", nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Document ingestion golden scenarios
@@ -89,14 +203,14 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 	agent := agents.NewDocumentAgent(storage, queue, db, ocr, validator, tracer)
 
 	tests := []struct {
-		name            string
-		blobURL         string
-		filename        string
-		wantDocType     string
-		wantConfidence  float64
-		wantNeedsHITL   bool
-		wantError       bool
-		wantTrustTier   domain.TrustTier
+		name           string
+		blobURL        string
+		filename       string
+		wantDocType    string
+		wantConfidence float64
+		wantNeedsHITL  bool
+		wantError      bool
+		wantTrustTier  domain.TrustTier
 	}{
 		{
 			name:           "Clean invoice",
@@ -104,9 +218,9 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 			filename:       "invoice_2024.pdf",
 			wantDocType:    "INVOICE",
 			wantConfidence: 0.95,
-			wantNeedsHITL: false,
-			wantError:     false,
-			wantTrustTier: domain.TrustTierStandard,
+			wantNeedsHITL:  false,
+			wantError:      false,
+			wantTrustTier:  domain.TrustTierStandard,
 		},
 		{
 			name:           "Blurry invoice",
@@ -114,9 +228,9 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 			filename:       "blurry_invoice.pdf",
 			wantDocType:    "INVOICE",
 			wantConfidence: 0.45,
-			wantNeedsHITL: true,
-			wantError:     false,
-			wantTrustTier: domain.TrustTierProbation,
+			wantNeedsHITL:  true,
+			wantError:      false,
+			wantTrustTier:  domain.TrustTierProbation,
 		},
 		{
 			name:      "Corrupted file",
@@ -131,8 +245,8 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 			wantDocType:    "INVOICE",
 			wantConfidence: 0.90,
 			wantNeedsHITL:  true,
-			wantError:     false,
-			wantTrustTier: domain.TrustTierProbation,
+			wantError:      false,
+			wantTrustTier:  domain.TrustTierProbation,
 		},
 		{
 			name:           "Contract doc",
@@ -140,9 +254,9 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 			filename:       "service-contract.pdf",
 			wantDocType:    "CONTRACT",
 			wantConfidence: 0.95,
-			wantNeedsHITL: false,
-			wantError:     false,
-			wantTrustTier: domain.TrustTierStandard,
+			wantNeedsHITL:  false,
+			wantError:      false,
+			wantTrustTier:  domain.TrustTierStandard,
 		},
 		{
 			name:           "PO doc",
@@ -150,9 +264,9 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 			filename:       "po-2024.pdf",
 			wantDocType:    "PURCHASE_ORDER",
 			wantConfidence: 0.95,
-			wantNeedsHITL: false,
-			wantError:     false,
-			wantTrustTier: domain.TrustTierStandard,
+			wantNeedsHITL:  false,
+			wantError:      false,
+			wantTrustTier:  domain.TrustTierStandard,
 		},
 		{
 			name:           "Unknown doc",
@@ -160,9 +274,9 @@ func TestGolden_DocumentIngestion(t *testing.T) {
 			filename:       "unknown.txt",
 			wantDocType:    "OTHER",
 			wantConfidence: 0.95,
-			wantNeedsHITL: false,
-			wantError:     false,
-			wantTrustTier: domain.TrustTierStandard,
+			wantNeedsHITL:  false,
+			wantError:      false,
+			wantTrustTier:  domain.TrustTierStandard,
 		},
 	}
 
@@ -236,58 +350,58 @@ func TestGolden_VendorOnboarding(t *testing.T) {
 		wantLLMAnalysis bool
 	}{
 		{
-			name:           "Clean vendor",
-			gst:            "22AAAAA0000A1Z5",
-			pan:            "ABCDE1234F",
-			ifsc:           "SBIN0001234",
-			documents:      []string{},
-			wantRiskScore:  65,
-			wantTrustTier:  domain.TrustTierProbation,
-			wantNeedsHITL:  true,
+			name:            "Clean vendor",
+			gst:             "22AAAAA0000A1Z5",
+			pan:             "ABCDE1234F",
+			ifsc:            "SBIN0001234",
+			documents:       []string{},
+			wantRiskScore:   65,
+			wantTrustTier:   domain.TrustTierProbation,
+			wantNeedsHITL:   true,
 			wantLLMAnalysis: false,
 		},
 		{
-			name:           "No IDs",
-			gst:            "",
-			pan:            "",
-			ifsc:           "",
-			documents:      []string{},
-			wantRiskScore:  15,
-			wantTrustTier:  domain.TrustTierPreferred,
-			wantNeedsHITL:  false,
+			name:            "No IDs",
+			gst:             "",
+			pan:             "",
+			ifsc:            "",
+			documents:       []string{},
+			wantRiskScore:   15,
+			wantTrustTier:   domain.TrustTierPreferred,
+			wantNeedsHITL:   false,
 			wantLLMAnalysis: false,
 		},
 		{
-			name:           "Invalid GST",
-			gst:            "bad-gst",
-			pan:            "",
-			ifsc:           "",
-			documents:      []string{},
-			wantRiskScore:  15,
-			wantTrustTier:  domain.TrustTierStandard,
-			wantNeedsHITL:  true,
+			name:            "Invalid GST",
+			gst:             "bad-gst",
+			pan:             "",
+			ifsc:            "",
+			documents:       []string{},
+			wantRiskScore:   15,
+			wantTrustTier:   domain.TrustTierStandard,
+			wantNeedsHITL:   true,
 			wantLLMAnalysis: false,
 		},
 		{
-			name:           "Full vendor with docs",
-			gst:            "22AAAAA0000A1Z5",
-			pan:            "ABCDE1234F",
-			ifsc:           "SBIN0001234",
-			documents:      []string{"doc.pdf"},
-			wantRiskScore:  65,
-			wantTrustTier:  domain.TrustTierProbation,
-			wantNeedsHITL:  true,
+			name:            "Full vendor with docs",
+			gst:             "22AAAAA0000A1Z5",
+			pan:             "ABCDE1234F",
+			ifsc:            "SBIN0001234",
+			documents:       []string{"doc.pdf"},
+			wantRiskScore:   65,
+			wantTrustTier:   domain.TrustTierProbation,
+			wantNeedsHITL:   true,
 			wantLLMAnalysis: true,
 		},
 		{
-			name:          "Empty vendor",
-			gst:           "",
-			pan:           "",
-			ifsc:          "",
-			documents:     []string{},
-			wantRiskScore: 15,
-			wantTrustTier: domain.TrustTierPreferred,
-			wantNeedsHITL: false,
+			name:            "Empty vendor",
+			gst:             "",
+			pan:             "",
+			ifsc:            "",
+			documents:       []string{},
+			wantRiskScore:   15,
+			wantTrustTier:   domain.TrustTierPreferred,
+			wantNeedsHITL:   false,
 			wantLLMAnalysis: false,
 		},
 	}
@@ -362,31 +476,31 @@ func TestGolden_ComplianceSeverity(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name     string
-		title    string
-		content  string
-		wantSeverity string
+		name               string
+		title              string
+		content            string
+		wantSeverity       string
 		wantClassification string
 	}{
 		{
-			name:     "Penalty notice",
-			title:    "Penalty notice for late filing",
-			content:  "This is a penalty notice",
-			wantSeverity: "HIGH",
+			name:               "Penalty notice",
+			title:              "Penalty notice for late filing",
+			content:            "This is a penalty notice",
+			wantSeverity:       "HIGH",
 			wantClassification: "penalty found",
 		},
 		{
-			name:     "Advisory note",
-			title:    "Advisory on new regulations",
-			content:  "This is an advisory note",
-			wantSeverity: "MEDIUM",
+			name:               "Advisory note",
+			title:              "Advisory on new regulations",
+			content:            "This is an advisory note",
+			wantSeverity:       "MEDIUM",
 			wantClassification: "advisory found",
 		},
 		{
-			name:     "General update",
-			title:    "General update on compliance",
-			content:  "This is a general update",
-			wantSeverity: "LOW",
+			name:               "General update",
+			title:              "General update on compliance",
+			content:            "This is a general update",
+			wantSeverity:       "LOW",
 			wantClassification: "default",
 		},
 	}

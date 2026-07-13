@@ -63,7 +63,7 @@ func TestStubLLMErrorDoesNotCrashAgent(t *testing.T) {
 	}
 
 	// Assert 2: vendor still saved in the database
-	savedVendor, err := infra.DB.GetVendor(ctx, vendorJob.JobID)
+	savedVendor, err := infra.DB.GetVendor(ctx, vendorJob.JobID, vendorJob.TenantID)
 	if err != nil {
 		t.Fatalf("vendor should have been saved despite LLM error: %v", err)
 	}

@@ -32,7 +32,7 @@ type SlackHITLProvider struct {
 // NewSlackHITLProvider creates a new Slack HITL provider
 func NewSlackHITLProvider(token string) *SlackHITLProvider {
 	return &SlackHITLProvider{
-		client:    slack.New(token),
+		client:     slack.New(token),
 		webhookURL: "http://localhost:3100/api/chat.postMessage",
 	}
 }

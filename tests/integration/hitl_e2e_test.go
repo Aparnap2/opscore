@@ -87,11 +87,11 @@ func (m *e2eMockDB) UpsertVendor(_ context.Context, vendor *domain.Vendor) error
 	return nil
 }
 
-func (m *e2eMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) {
+func (m *e2eMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	v, ok := m.vendors[id]
-	if !ok {
+	if !ok || v.TenantID != tenantID {
 		return nil, fmt.Errorf("vendor not found")
 	}
 	return v, nil
@@ -116,11 +116,11 @@ func (m *e2eMockDB) UpsertDocument(_ context.Context, doc *domain.Document) erro
 	return nil
 }
 
-func (m *e2eMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) {
+func (m *e2eMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.documents[id]
-	if !ok {
+	if !ok || d.TenantID != tenantID {
 		return nil, fmt.Errorf("document not found")
 	}
 	return d, nil
@@ -144,11 +144,11 @@ func (m *e2eMockDB) UpsertHITLRequest(_ context.Context, req *domain.HITLRequest
 	return nil
 }
 
-func (m *e2eMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) {
+func (m *e2eMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.hitlRequests[id]
-	if !ok {
+	if !ok || r.TenantID != tenantID {
 		return nil, fmt.Errorf("HITL request not found")
 	}
 	return r, nil
@@ -162,6 +162,38 @@ func (m *e2eMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*doma
 		if r.TenantID == tenantID && r.Status == domain.HITLStatusPending {
 			result = append(result, r)
 		}
+	}
+	return result, nil
+}
+
+func (m *e2eMockDB) ListHITLRequests(_ context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.HITLRequest
+	for _, r := range m.hitlRequests {
+		if r.TenantID != tenantID {
+			continue
+		}
+		if status != "" && string(r.Status) != status {
+			continue
+		}
+		result = append(result, r)
+	}
+	// Sort by sent_at descending.
+	for i := 0; i < len(result); i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].SentAt.Before(result[j].SentAt) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	// Apply pagination.
+	if offset >= len(result) {
+		return []*domain.HITLRequest{}, nil
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
 	}
 	return result, nil
 }
@@ -487,7 +519,7 @@ func TestHITLE2E_FullFlow(t *testing.T) {
 	// -----------------------------------------------------------------------
 	// Step 7: Verify HITL request was approved
 	// -----------------------------------------------------------------------
-	hitlReq, err = e2eDB.GetHITLRequest(nil, "hitl-"+uploadResp.JobID)
+	hitlReq, err = e2eDB.GetHITLRequest(nil, "hitl-"+uploadResp.JobID, "hitl-e2e")
 	if err != nil {
 		t.Fatalf("GetHITLRequest failed: %v", err)
 	}
@@ -721,8 +753,8 @@ func (s *e2eServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Reque
 		// Parse the callback ourselves
 		callback := payloadBody(body)
 		var cb struct {
-			Type  string `json:"type"`
-			User  struct {
+			Type string `json:"type"`
+			User struct {
 				ID   string `json:"id"`
 				Name string `json:"name"`
 			} `json:"user"`
@@ -776,7 +808,7 @@ func (s *e2eServerDeps) slackWebhookHandler(w http.ResponseWriter, r *http.Reque
 		job.UpdatedAt = time.Now()
 		_ = s.db.UpsertJob(ctx, job)
 
-		hitlReq, err := s.db.GetHITLRequest(ctx, "hitl-"+jobID)
+		hitlReq, err := s.db.GetHITLRequest(ctx, "hitl-"+jobID, job.TenantID)
 		if err == nil && hitlReq != nil {
 			hitlReq.Status = hitlStatus
 			t := time.Now()

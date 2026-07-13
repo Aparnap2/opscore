@@ -81,11 +81,11 @@ func (m *mockDB) UpsertVendor(_ context.Context, vendor *domain.Vendor) error {
 	return nil
 }
 
-func (m *mockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) {
+func (m *mockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	v, ok := m.vendors[id]
-	if !ok {
+	if !ok || v.TenantID != tenantID {
 		return nil, fmt.Errorf("vendor not found")
 	}
 	return v, nil
@@ -110,11 +110,11 @@ func (m *mockDB) UpsertDocument(_ context.Context, doc *domain.Document) error {
 	return nil
 }
 
-func (m *mockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) {
+func (m *mockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.documents[id]
-	if !ok {
+	if !ok || d.TenantID != tenantID {
 		return nil, fmt.Errorf("document not found")
 	}
 	return d, nil
@@ -138,11 +138,11 @@ func (m *mockDB) UpsertHITLRequest(_ context.Context, req *domain.HITLRequest) e
 	return nil
 }
 
-func (m *mockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) {
+func (m *mockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.hitlRequests[id]
-	if !ok {
+	if !ok || r.TenantID != tenantID {
 		return nil, fmt.Errorf("HITL request not found")
 	}
 	return r, nil
@@ -158,6 +158,10 @@ func (m *mockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.
 		}
 	}
 	return result, nil
+}
+
+func (m *mockDB) ListHITLRequests(_ context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error) {
+	return nil, nil
 }
 
 func (m *mockDB) AppendAuditEvent(_ context.Context, event *domain.AuditEvent) error {
@@ -349,9 +353,9 @@ const (
 	testFileName = "invoice-2024.pdf"
 )
 
-func validGST() string    { return "22AAAAA0000A1Z5" }
-func validPAN() string    { return "AAAAA0000A" }
-func validIFSC() string   { return "HDFC0001234" }
+func validGST() string  { return "22AAAAA0000A1Z5" }
+func validPAN() string  { return "AAAAA0000A" }
+func validIFSC() string { return "HDFC0001234" }
 
 func newTestDocumentAgent(mockOCR *mockOCR) (*DocumentAgent, *mockDB) {
 	db := newMockDB()
@@ -458,7 +462,7 @@ func TestDocumentAgent_ProcessDocument_AutoComplete(t *testing.T) {
 	}
 
 	// Verify NO HITL request was created
-	_, err = db.GetHITLRequest(context.Background(), "hitl-"+testJobID)
+	_, err = db.GetHITLRequest(context.Background(), "hitl-"+testJobID, testTenantID)
 	if err == nil {
 		t.Error("HITL request was created but should not have been")
 	}
@@ -644,7 +648,7 @@ func TestVendorAgent_ProcessVendor_Clean(t *testing.T) {
 	}
 
 	// Verify vendor saved in DB
-	vendor, err := db.GetVendor(context.Background(), job.JobID)
+	vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
 	if err != nil {
 		t.Fatalf("GetVendor() returned error: %v", err)
 	}
@@ -711,7 +715,7 @@ func TestVendorAgent_ProcessVendor_EmptyIDs(t *testing.T) {
 	}
 
 	// Verify vendor saved and auto-approved (risk < 60 and no validation errors)
-	vendor, err := db.GetVendor(context.Background(), job.JobID)
+	vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
 	if err != nil {
 		t.Fatalf("GetVendor() returned error: %v", err)
 	}
@@ -761,7 +765,7 @@ func TestVendorAgent_ProcessVendor_InvalidGST(t *testing.T) {
 	}
 
 	// Verify HITL request was created
-	hitlReq, err := db.GetHITLRequest(context.Background(), "hitl-"+job.JobID)
+	hitlReq, err := db.GetHITLRequest(context.Background(), "hitl-"+job.JobID, testTenantID)
 	if err != nil {
 		t.Fatalf("GetHITLRequest() returned error: %v", err)
 	}
@@ -813,7 +817,7 @@ func TestVendorAgent_ProcessVendor_WithLLMAnalysis(t *testing.T) {
 	}
 
 	// Verify vendor saved
-	vendor, err := db.GetVendor(context.Background(), job.JobID)
+	vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
 	if err != nil {
 		t.Fatalf("GetVendor() returned error: %v", err)
 	}
@@ -972,7 +976,7 @@ func TestVendorAgent_ProcessVendor_SetsTimestamps(t *testing.T) {
 	}
 
 	// Verify vendor timestamps
-	vendor, err := db.GetVendor(context.Background(), job.JobID)
+	vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
 	if err != nil {
 		t.Fatalf("GetVendor() returned error: %v", err)
 	}

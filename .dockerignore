@@ -1,0 +1,31 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Tests and test data (not needed in production image)
+tests/
+test_data/
+
+# Ops UI (Streamlit admin panel — built separately)
+ops-ui/
+
+# Infrastructure definitions (Bicep, etc.)
+infra/
+
+# Environment files (contain secrets)
+.env
+.env.example
+.env.*
+
+# macOS artifacts
+.DS_Store
+
+# IDE configs
+.idea/
+.vscode/
+*.swp
+*.swo

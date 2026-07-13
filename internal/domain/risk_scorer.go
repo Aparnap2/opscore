@@ -136,5 +136,3 @@ func ComputeVendorRisk(vendor *Vendor, existingVendors []*Vendor, blacklist []st
 		Flags: flags,
 	}
 }
-
-

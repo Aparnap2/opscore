@@ -69,7 +69,11 @@ internal/providers/         # Interface definitions (OCR, LLM, DB, Storage, Queu
 internal/adapters/          # Implementations (Postgres, MinIO, Redis, Sarvam)
 internal/agents/            # Workflow orchestrators (document, vendor, compliance)
 internal/telemetry/         # Langfuse tracing, metrics, no-op fallback
-internal/middleware/        # Rate limiter
+internal/middleware/        # HTTP middleware
+│   ├── auth/               # API-key auth & RBAC (Owner, OpsAdmin, Reviewer)
+│   ├── tenant/             # Tenant context extraction
+│   ├── ratelimit/          # Rate limiter
+│   └── usage/              # Plan limit enforcement
 ops-ui/                     # Streamlit admin dashboard
 ```
 
@@ -83,6 +87,8 @@ The system follows a hexagonal (ports & adapters) architecture. Every external d
 | GST/PAN/IFSC validation | `internal/domain/india_validator.go` (compiled Go regex) |
 | Vendor risk scoring | `internal/domain/risk_scorer.go` (base 50 + adjustments) |
 | Trust tier transitions | `internal/domain/trust_battery.go` (state machine) |
+
+Architecture decisions are recorded in `docs/architecture/adr/` (20 ADRs covering the full system).
 
 ---
 
@@ -107,6 +113,9 @@ All endpoints except `/health` require the `X-Tenant-ID` header.
 | GET | `/metrics/llm-summary` | LLM call metrics (count, latency, cost) |
 | GET | `/metrics/workflow-summary` | Workflow processing metrics |
 | POST | `/slack/webhook` | Slack interactive callbacks |
+| GET | `/admin/review-queue` | List pending HITL requests (query: `?status=&tenant_id=&limit=&offset=`) |
+| GET | `/admin/review-queue/{id}` | Get single HITL request with audit events |
+| POST | `/admin/review-queue` | Approve/reject a HITL request |
 
 ---
 
@@ -123,7 +132,7 @@ cp .env.example .env
 
 # 3. Start infrastructure (Postgres + MinIO + Redis)
 make local-up
-# Launches: Postgres 16 on :5432, MinIO on :9000/:9001, Redis 7 on :6379
+# Launches: Postgres 16 on :5432, MinIO on :9000/:9001, Redis 7 on :6380
 
 # 4. Run the API server (terminal 1)
 make run-api
@@ -208,7 +217,10 @@ opscore/
 │   │   └── logger.go           # log/slog JSON handler configuration
 │   │
 │   └── middleware/             # HTTP middleware
-│       └── ratelimit/          # Rate limiter
+│       ├── auth/               # API-key auth & RBAC (Owner, OpsAdmin, Reviewer)
+│       ├── tenant/             # Tenant context extraction
+│       ├── ratelimit/          # Rate limiter
+│       └── usage/              # Plan limit enforcement
 │
 ├── ops-ui/                     # Streamlit admin dashboard
 │   ├── app.py                  # Dashboard entry point (REST-only)
@@ -218,16 +230,42 @@ opscore/
 ├── tests/                      # Test suites
 │   ├── unit/                   # Pure unit tests (no infra)
 │   ├── domain/                 # Domain-layer tests
-│   ├── integration/            # Integration tests (requires Docker)
+│   ├── integration/            # Docker-backed integration tests
+│   │   ├── handler_test.go     # HTTP handler tests with mocks
+│   │   ├── handler_review_queue_test.go  # Review queue endpoint tests
+│   │   ├── e2e_test.go         # Full pipeline E2E tests
+│   │   └── hitl_e2e_test.go    # Slack HITL flow tests
 │   ├── agentic/                # Agent workflow tests
+│   │   ├── vendor_workflow_test.go  # Vendor onboarding tests
+│   │   ├── document_workflow_test.go # Document ingestion tests
+│   │   ├── error_recovery_test.go    # Failure/recovery tests
+│   │   ├── state_recovery_test.go    # State machine recovery tests
+│   │   ├── pipeline_test.go          # Full pipeline tests
+│   │   ├── review_queue_admin_test.go # Admin queue tests
+│   │   ├── golden/                   # Golden trajectory tests
+│   │   ├── contracts/               # Provider contract tests
+│   │   ├── decisions/               # Decision logic tests
+│   │   ├── states/                  # State machine tests
+│   │   └── latency/                 # Latency tests
+│   ├── live/                   # Live provider tests (opt-in, //go:build live)
+│   ├── load/                   # Load tests (k6)
 │   ├── golden/                 # Golden file / snapshot tests
 │   ├── security/               # Security-focused tests
 │   ├── ragas_eval/             # LLM output evaluation (RAGAS)
 │   ├── mockoon/                # Slack API mock configurations
 │   └── fixtures/               # Test PDFs and expected outputs
-│
+
+├── docs/
+│   ├── architecture/
+│   │   ├── ADR-001-retrieval-architecture.md
+│   │   └── adr/
+│   │       ├── 0002-vendor-onboarding-realtime-nw.md
+│   │       ├── 0003-multi-tenancy-tenant-isolation.md
+│   │       └── ... (19 ADR files total)
+
 ├── infra/                      # Infrastructure as Code
-│   └── main.bicep              # Azure Bicep (legacy) / GCP config
+│   ├── main.bicep              # Azure Bicep (legacy) / GCP config
+│   └── init-db.sh              # Tenant seed data
 │
 ├── config/                     # Application configuration
 ├── scripts/                    # Utility scripts

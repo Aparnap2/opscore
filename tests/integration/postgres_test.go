@@ -14,7 +14,7 @@ import (
 func TestPostgresAdapter(t *testing.T) {
 	connStr := os.Getenv("TEST_DATABASE_URL")
 	if connStr == "" {
-		connStr = "postgres://opscore:opscore@localhost:5433/opscore?sslmode=disable"
+		connStr = "postgres://opscore:opscore@localhost:5432/opscore?sslmode=disable"
 	}
 
 	ctx := context.Background()
@@ -34,15 +34,15 @@ func TestPostgresAdapter(t *testing.T) {
 	jobID := uuid.New().String()
 	now := time.Now().UTC()
 	job := &domain.Job{
-		ID:           jobID,
-		TenantID:     "test-tenant",
-		WorkflowType: domain.WorkflowDocumentIngestion,
-		Status:       domain.JobStatusPending,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		TraceID:      "trace-123",
+		ID:            jobID,
+		TenantID:      "test-tenant",
+		WorkflowType:  domain.WorkflowDocumentIngestion,
+		Status:        domain.JobStatusPending,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		TraceID:       "trace-123",
 		CorrelationID: "corr-123",
-		Input:        map[string]string{"filename": "test.pdf"},
+		Input:         map[string]string{"filename": "test.pdf"},
 	}
 	if err := adapter.UpsertJob(ctx, job); err != nil {
 		t.Fatalf("UpsertJob failed: %v", err)
@@ -79,7 +79,7 @@ func TestPostgresAdapter(t *testing.T) {
 	}
 	t.Log("✓ UpsertVendor OK")
 
-	gotV, err := adapter.GetVendor(ctx, vendorID)
+	gotV, err := adapter.GetVendor(ctx, vendorID, "test-tenant")
 	if err != nil {
 		t.Fatalf("GetVendor failed: %v", err)
 	}

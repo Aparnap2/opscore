@@ -8,7 +8,7 @@ func TestValidateAadhaar(t *testing.T) {
 	tests := []struct {
 		name    string
 		aadhaar string
-		valid  bool
+		valid   bool
 	}{
 		{"valid 12 digit", "123456789012", true},
 		{"valid all 9s", "999999999999", true},
@@ -30,8 +30,8 @@ func TestValidateAadhaar(t *testing.T) {
 
 func TestValidateUPI(t *testing.T) {
 	tests := []struct {
-		name string
-		upi  string
+		name  string
+		upi   string
 		valid bool
 	}{
 		{"valid UPI", "9876543210@upi", true},
@@ -79,9 +79,9 @@ func TestValidateBankAccount(t *testing.T) {
 
 func TestValidatePINCode(t *testing.T) {
 	tests := []struct {
-		name    string
-		pin    string
-		valid  bool
+		name  string
+		pin   string
+		valid bool
 	}{
 		{"valid PIN", "110001", true},
 		{"valid PIN 2", "500001", true},
@@ -128,7 +128,7 @@ func TestValidateStateCode(t *testing.T) {
 
 func TestExtractStateCodeFromGST(t *testing.T) {
 	tests := []struct {
-		name      string
+		name     string
 		gst      string
 		wantCode string
 	}{
@@ -150,9 +150,9 @@ func TestExtractStateCodeFromGST(t *testing.T) {
 
 func TestGetStateFromGST(t *testing.T) {
 	tests := []struct {
-		name    string
-		gst     string
-		want    string
+		name string
+		gst  string
+		want string
 	}{
 		{"Maharashtra", "27AABCS1209D1Z5", "Maharashtra"},
 		{"Delhi", "07AABCS1209D1Z5", "Delhi"},
@@ -218,11 +218,11 @@ func TestIndiaValidator_ValidateVendor(t *testing.T) {
 	iv := NewIndiaValidator()
 
 	tests := []struct {
-		name      string
-		gst       string
-		pan       string
-		ifsc      string
-		wantValid bool
+		name         string
+		gst          string
+		pan          string
+		ifsc         string
+		wantValid    bool
 		wantErrCount int
 	}{
 		{"all valid", "27AABCS1209D1Z5", "AABCS1209D", "HDFC0CGBIBL", true, 0},
@@ -250,9 +250,9 @@ func TestIndiaValidator_ValidateAll(t *testing.T) {
 	iv := NewIndiaValidator()
 
 	tests := []struct {
-		name      string
-		kvs       map[string]string
-		wantValid bool
+		name         string
+		kvs          map[string]string
+		wantValid    bool
 		wantErrCount int
 	}{
 		{
@@ -262,7 +262,7 @@ func TestIndiaValidator_ValidateAll(t *testing.T) {
 				"pan":  "AABCS1209D",
 				"ifsc": "HDFC0CGBIBL",
 			},
-			wantValid: true,
+			wantValid:    true,
 			wantErrCount: 0,
 		},
 		{
@@ -272,13 +272,13 @@ func TestIndiaValidator_ValidateAll(t *testing.T) {
 				"pan":  "BADPAN",
 				"ifsc": "BADIFSC",
 			},
-			wantValid: false,
+			wantValid:    false,
 			wantErrCount: 3,
 		},
 		{
-			name: "empty map",
-			kvs:  map[string]string{},
-			wantValid: true,
+			name:         "empty map",
+			kvs:          map[string]string{},
+			wantValid:    true,
 			wantErrCount: 0,
 		},
 		{
@@ -286,7 +286,7 @@ func TestIndiaValidator_ValidateAll(t *testing.T) {
 			kvs: map[string]string{
 				"gst": "27AABCS1209D1Z5",
 			},
-			wantValid: true,
+			wantValid:    true,
 			wantErrCount: 0,
 		},
 	}

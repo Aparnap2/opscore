@@ -127,6 +127,125 @@ CREATE INDEX IF NOT EXISTS idx_hitl_requests_pending ON hitl_requests(tenant_id,
 		name:    "add_jobs_version_column",
 		sql:     `ALTER TABLE jobs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0;`,
 	},
+	{
+		version: 3,
+		name:    "create_tenants_table",
+		sql: `
+CREATE TABLE IF NOT EXISTS tenants (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	plan TEXT NOT NULL DEFAULT 'starter',
+	status TEXT NOT NULL DEFAULT 'active',
+	config JSONB DEFAULT '{}',
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
+`,
+	},
+	{
+		version: 4,
+		name:    "create_usage_records_table",
+		sql: `
+CREATE TABLE IF NOT EXISTS usage_records (
+	tenant_id TEXT NOT NULL,
+	metric TEXT NOT NULL,
+	count BIGINT NOT NULL DEFAULT 0,
+	period_start TIMESTAMPTZ NOT NULL,
+	period_end TIMESTAMPTZ NOT NULL,
+	updated_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, metric, period_start)
+);
+CREATE INDEX IF NOT EXISTS idx_usage_tenant_period ON usage_records(tenant_id, period_start);
+`,
+	},
+	{
+		version: 5,
+		name:    "enable_row_level_security",
+		sql: `
+-- Create the app schema for helper functions.
+CREATE SCHEMA IF NOT EXISTS app;
+
+-- Create a helper function that returns the current tenant_id from session settings.
+-- Falls back to 'default' if not set, so existing clients without RLS context work.
+CREATE OR REPLACE FUNCTION app.current_tenant_id() RETURNS TEXT
+    LANGUAGE SQL STABLE
+AS $$
+    SELECT COALESCE(
+        NULLIF(current_setting('app.tenant_id', TRUE), ''),
+        'default'
+    );
+$$;
+
+-- Jobs: RLS with USING + WITH CHECK
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON jobs;
+CREATE POLICY tenant_isolation ON jobs
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- Vendors
+ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vendors FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON vendors;
+CREATE POLICY tenant_isolation ON vendors
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- Documents
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON documents;
+CREATE POLICY tenant_isolation ON documents
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- Audit events
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON audit_events;
+CREATE POLICY tenant_isolation ON audit_events
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- HITL requests
+ALTER TABLE hitl_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE hitl_requests FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON hitl_requests;
+CREATE POLICY tenant_isolation ON hitl_requests
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- Compliance chunks
+ALTER TABLE compliance_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE compliance_chunks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON compliance_chunks;
+CREATE POLICY tenant_isolation ON compliance_chunks
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- Usage records
+ALTER TABLE usage_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_records FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON usage_records;
+CREATE POLICY tenant_isolation ON usage_records
+    USING (tenant_id = app.current_tenant_id())
+    WITH CHECK (tenant_id = app.current_tenant_id());
+
+-- Tenants: NO RLS here. The tenants table is the bootstrap table — RLS
+-- can't protect the table you query to find tenants before you know
+-- the tenant context. Application-layer authorization handles this.
+-- (RLS was previously enabled but the policy broke slug-based routing
+-- for non-default tenants because current_tenant_id() returns 'default'
+-- before any tenant context is set.)
+
+-- Performance indexes for multi-tenant queries
+CREATE INDEX IF NOT EXISTS idx_jobs_tenant_created ON jobs(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vendors_trust_tier ON vendors(tenant_id, (trust_battery->>'tier'));
+`,
+	},
 }
 
 // RunMigrations applies all pending migrations in order, using a connection-scoped

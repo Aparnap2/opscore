@@ -34,23 +34,72 @@ func newCompMockDB() *compMockDB {
 	}
 }
 
-func (m *compMockDB) UpsertDocument(_ context.Context, d *domain.Document) error { m.mu.Lock(); defer m.mu.Unlock(); m.documents[d.ID] = d; return nil }
-func (m *compMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) { m.mu.Lock(); defer m.mu.Unlock(); d, ok := m.documents[id]; if !ok { return nil, fmt.Errorf("not found") }; return d, nil }
-func (m *compMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) { return nil, nil }
-func (m *compMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error { m.mu.Lock(); defer m.mu.Unlock(); m.hitlReqs[r.ID] = r; return nil }
-func (m *compMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) { m.mu.Lock(); defer m.mu.Unlock(); r, ok := m.hitlReqs[id]; if !ok { return nil, fmt.Errorf("not found") }; return r, nil }
-func (m *compMockDB) ListPendingHITL(_ context.Context, _ string) ([]*domain.HITLRequest, error) { return nil, nil }
+func (m *compMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.documents[d.ID] = d
+	return nil
+}
+func (m *compMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.documents[id]
+	if !ok || d.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return d, nil
+}
+func (m *compMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
+	return nil, nil
+}
+func (m *compMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hitlReqs[r.ID] = r
+	return nil
+}
+func (m *compMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.hitlReqs[id]
+	if !ok || r.TenantID != tenantID {
+		return nil, fmt.Errorf("not found")
+	}
+	return r, nil
+}
+func (m *compMockDB) ListPendingHITL(_ context.Context, _ string) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
+func (m *compMockDB) ListHITLRequests(_ context.Context, _, _ string, _, _ int) ([]*domain.HITLRequest, error) {
+	return nil, nil
+}
 func (m *compMockDB) UpsertJob(_ context.Context, _ *domain.Job) error { return nil }
-func (m *compMockDB) GetJob(_ context.Context, _, _ string) (*domain.Job, error) { return nil, fmt.Errorf("not found") }
-func (m *compMockDB) ListJobs(_ context.Context, _ string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) { return nil, nil }
+func (m *compMockDB) GetJob(_ context.Context, _, _ string) (*domain.Job, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *compMockDB) ListJobs(_ context.Context, _ string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
+	return nil, nil
+}
 func (m *compMockDB) UpsertVendor(_ context.Context, _ *domain.Vendor) error { return nil }
-func (m *compMockDB) GetVendor(_ context.Context, _ string) (*domain.Vendor, error) { return nil, fmt.Errorf("not found") }
-func (m *compMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
+func (m *compMockDB) GetVendor(_ context.Context, _, _ string) (*domain.Vendor, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *compMockDB) ListVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
 func (m *compMockDB) AppendAuditEvent(_ context.Context, _ *domain.AuditEvent) error { return nil }
-func (m *compMockDB) ListAuditEvents(_ context.Context, _, _, _ string, _ int) ([]*domain.AuditEvent, error) { return nil, nil }
-func (m *compMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) { return nil, nil }
-func (m *compMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) { return nil, nil }
-func (m *compMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) { return nil, nil }
+func (m *compMockDB) ListAuditEvents(_ context.Context, _, _, _ string, _ int) ([]*domain.AuditEvent, error) {
+	return nil, nil
+}
+func (m *compMockDB) GetRecentJobs(_ context.Context, _ string, _ int) ([]*domain.Job, error) {
+	return nil, nil
+}
+func (m *compMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
+	return nil, nil
+}
+func (m *compMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
+	return nil, nil
+}
 
 // compMockLLM implements providers.LLMProvider for compliance tests.
 type compMockLLM struct {
@@ -90,7 +139,7 @@ func TestCompliance_ClassifySeverity(t *testing.T) {
 		name    string
 		title   string
 		content string
-		want   string
+		want    string
 	}{
 		{"HIGH_penalty", "Penalty notice for non-compliance", "details", "HIGH"},
 		{"HIGH_fine", "Fine imposed for violation", "details", "HIGH"},
@@ -309,7 +358,7 @@ func TestCompliance_ProcessCompliance_Scrape(t *testing.T) {
 
 	// Verify document was stored with type REGULATORY
 	docID := fmt.Sprintf("compliance-%s-0", job.JobID)
-	doc, err := db.GetDocument(ctx, docID)
+	doc, err := db.GetDocument(ctx, docID, job.TenantID)
 	if err != nil {
 		t.Fatalf("expected document to be stored: %v", err)
 	}
@@ -423,7 +472,7 @@ func TestCompliance_ChunkText(t *testing.T) {
 	// Each chunk should be stored with type REGULATORY_CHUNK
 	for i := 0; i < chunksCreated; i++ {
 		docID := fmt.Sprintf("chunk-%s-%d", job.JobID, i)
-		doc, err := db.GetDocument(ctx, docID)
+		doc, err := db.GetDocument(ctx, docID, job.TenantID)
 		if err != nil {
 			t.Errorf("chunk document %s not found: %v", docID, err)
 			continue

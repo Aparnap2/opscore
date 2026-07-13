@@ -190,7 +190,7 @@ func TestDocumentAgent_HITLTrajectory(t *testing.T) {
 	}
 
 	// ✅ Positive: HITLRequest exists with PENDING status
-	hitlReq, err := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID)
+	hitlReq, err := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
 	if err != nil {
 		t.Fatalf("failed to get HITL request: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestDocumentAgent_OCRErrorTrajectory(t *testing.T) {
 	}
 
 	// ❌ Negative: no HITL request should exist (job never completed processing)
-	_, hitlErr := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID)
+	_, hitlErr := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
 	if hitlErr == nil {
 		t.Error("unexpected HITL request found for OCR-error job")
 	}
@@ -408,7 +408,7 @@ func TestDocumentAgent_ValidationErrorTrajectory(t *testing.T) {
 	}
 
 	// ✅ Positive: HITL request exists
-	hitlReq, err := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID)
+	hitlReq, err := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
 	if err != nil {
 		t.Fatalf("expected HITL request for validation error case: %v", err)
 	}

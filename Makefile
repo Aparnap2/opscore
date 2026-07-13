@@ -1,4 +1,4 @@
-.PHONY: local-up local-down run-api run-ui test-unit test-integration test-all test-live-llm test-live-ocr test-live test-all-with-live e2e-up e2e-run e2e-down test-e2e test-load-smoke test-load build lint fmt run
+.PHONY: local-up local-down run-api run-ui test-unit test-integration test-agentic test-isolation test-all test-live-llm test-live-ocr test-live test-all-with-live e2e-up e2e-run e2e-down test-e2e test-load-smoke test-load build lint fmt run docker-build docker-up docker-down docker-logs
 
 # --- Local Development ---
 
@@ -25,7 +25,31 @@ test-integration:
 	go test ./tests/... -v -tags integration -timeout 300s
 	docker compose -f docker-compose.test.yml down
 
-test-all: test-unit test-integration
+test-all: test-unit test-agentic test-isolation
+	@echo "All tests completed."
+
+# --- Docker Full Stack ---
+
+docker-build:
+	docker compose build app
+
+docker-up:
+	docker compose up -d
+	@echo "API: http://localhost:8080 | MinIO Console: http://localhost:9001"
+
+docker-down:
+	docker compose down -v
+
+docker-logs:
+	docker compose logs -f
+
+# --- Agentic / Isolation Tests ---
+
+test-agentic:
+	go test -tags agentic -count=1 -short -race ./tests/agentic/...
+
+test-isolation:
+	go test -tags agentic -race ./tests/agentic/isolation/...
 
 # --- Build & Tooling ---
 

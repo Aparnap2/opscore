@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	agentic "github.com/aparna/opscore/tests/agentic"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
+	agentic "github.com/aparna/opscore/tests/agentic"
 )
 
 // ---------------------------------------------------------------------------
@@ -276,79 +276,117 @@ func newContractMockDB() *contractMockDB {
 }
 
 func (m *contractMockDB) UpsertJob(_ context.Context, job *domain.Job) error {
-	m.jobs[job.ID] = job; return nil
+	m.jobs[job.ID] = job
+	return nil
 }
 func (m *contractMockDB) GetJob(_ context.Context, id, tenantID string) (*domain.Job, error) {
 	j, ok := m.jobs[id]
-	if !ok { return nil, io.EOF }
+	if !ok {
+		return nil, io.EOF
+	}
 	return j, nil
 }
 func (m *contractMockDB) ListJobs(_ context.Context, tenantID string, _ domain.WorkflowType, _ domain.JobStatus) ([]*domain.Job, error) {
 	var r []*domain.Job
-	for _, j := range m.jobs { if j.TenantID == tenantID { r = append(r, j) } }
+	for _, j := range m.jobs {
+		if j.TenantID == tenantID {
+			r = append(r, j)
+		}
+	}
 	return r, nil
 }
 func (m *contractMockDB) UpsertVendor(_ context.Context, v *domain.Vendor) error {
-	m.vendors[v.ID] = v; return nil
+	m.vendors[v.ID] = v
+	return nil
 }
-func (m *contractMockDB) GetVendor(_ context.Context, id string) (*domain.Vendor, error) {
+func (m *contractMockDB) GetVendor(_ context.Context, id, tenantID string) (*domain.Vendor, error) {
 	v, ok := m.vendors[id]
-	if !ok { return nil, io.EOF }
+	if !ok || v.TenantID != tenantID {
+		return nil, io.EOF
+	}
 	return v, nil
 }
 func (m *contractMockDB) ListVendors(_ context.Context, tenantID string) ([]*domain.Vendor, error) {
 	var r []*domain.Vendor
-	for _, v := range m.vendors { if v.TenantID == tenantID { r = append(r, v) } }
+	for _, v := range m.vendors {
+		if v.TenantID == tenantID {
+			r = append(r, v)
+		}
+	}
 	return r, nil
 }
 func (m *contractMockDB) UpsertDocument(_ context.Context, d *domain.Document) error {
-	m.documents[d.ID] = d; return nil
+	m.documents[d.ID] = d
+	return nil
 }
-func (m *contractMockDB) GetDocument(_ context.Context, id string) (*domain.Document, error) {
+func (m *contractMockDB) GetDocument(_ context.Context, id, tenantID string) (*domain.Document, error) {
 	d, ok := m.documents[id]
-	if !ok { return nil, io.EOF }
+	if !ok || d.TenantID != tenantID {
+		return nil, io.EOF
+	}
 	return d, nil
 }
 func (m *contractMockDB) FindBySHA256(_ context.Context, _, _ string) (*domain.Document, error) {
 	return nil, nil
 }
 func (m *contractMockDB) UpsertHITLRequest(_ context.Context, r *domain.HITLRequest) error {
-	m.hitlRequests[r.ID] = r; return nil
+	m.hitlRequests[r.ID] = r
+	return nil
 }
-func (m *contractMockDB) GetHITLRequest(_ context.Context, id string) (*domain.HITLRequest, error) {
+func (m *contractMockDB) GetHITLRequest(_ context.Context, id, tenantID string) (*domain.HITLRequest, error) {
 	r, ok := m.hitlRequests[id]
-	if !ok { return nil, io.EOF }
+	if !ok || r.TenantID != tenantID {
+		return nil, io.EOF
+	}
 	return r, nil
 }
 func (m *contractMockDB) ListPendingHITL(_ context.Context, tenantID string) ([]*domain.HITLRequest, error) {
 	var r []*domain.HITLRequest
 	for _, h := range m.hitlRequests {
-		if h.TenantID == tenantID && h.Status == domain.HITLStatusPending { r = append(r, h) }
+		if h.TenantID == tenantID && h.Status == domain.HITLStatusPending {
+			r = append(r, h)
+		}
 	}
 	return r, nil
 }
 func (m *contractMockDB) AppendAuditEvent(_ context.Context, e *domain.AuditEvent) error {
-	m.auditEvents = append(m.auditEvents, e); return nil
+	m.auditEvents = append(m.auditEvents, e)
+	return nil
 }
 func (m *contractMockDB) ListAuditEvents(_ context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error) {
 	var r []*domain.AuditEvent
 	for _, e := range m.auditEvents {
-		if e.TenantID != tenantID { continue }
-		if targetType != "" && e.TargetType != targetType { continue }
-		if targetID != "" && e.TargetID != targetID { continue }
+		if e.TenantID != tenantID {
+			continue
+		}
+		if targetType != "" && e.TargetType != targetType {
+			continue
+		}
+		if targetID != "" && e.TargetID != targetID {
+			continue
+		}
 		r = append(r, e)
-		if limit > 0 && len(r) >= limit { break }
+		if limit > 0 && len(r) >= limit {
+			break
+		}
 	}
 	return r, nil
 }
 func (m *contractMockDB) GetRecentJobs(_ context.Context, _ string, limit int) ([]*domain.Job, error) {
 	var r []*domain.Job
-	for _, j := range m.jobs { r = append(r, j); if limit > 0 && len(r) >= limit { break } }
+	for _, j := range m.jobs {
+		r = append(r, j)
+		if limit > 0 && len(r) >= limit {
+			break
+		}
+	}
 	return r, nil
 }
 func (m *contractMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Vendor, error) {
 	var r []*domain.Vendor
-	for _, v := range m.vendors { r = append(r, v) }
+	for _, v := range m.vendors {
+		r = append(r, v)
+	}
 	return r, nil
 }
 func (m *contractMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
@@ -364,8 +402,8 @@ func TestContract_DBProvider_CRUDRoundTrips(t *testing.T) {
 		job := &domain.Job{
 			ID: "test-job-1", TenantID: "tenant-1",
 			WorkflowType: domain.WorkflowDocumentIngestion,
-			Status: domain.JobStatusPending,
-			CreatedAt: now, UpdatedAt: now,
+			Status:       domain.JobStatusPending,
+			CreatedAt:    now, UpdatedAt: now,
 		}
 		if err := db.UpsertJob(ctx, job); err != nil {
 			t.Fatalf("UpsertJob failed: %v", err)
@@ -403,7 +441,7 @@ func TestContract_DBProvider_CRUDRoundTrips(t *testing.T) {
 		if err := db.UpsertVendor(ctx, v); err != nil {
 			t.Fatalf("UpsertVendor failed: %v", err)
 		}
-		got, err := db.GetVendor(ctx, "vendor-1")
+		got, err := db.GetVendor(ctx, "vendor-1", "tenant-1")
 		if err != nil {
 			t.Fatalf("GetVendor failed: %v", err)
 		}
@@ -424,7 +462,7 @@ func TestContract_DBProvider_CRUDRoundTrips(t *testing.T) {
 		if err := db.UpsertDocument(ctx, d); err != nil {
 			t.Fatalf("UpsertDocument failed: %v", err)
 		}
-		got, err := db.GetDocument(ctx, "doc-1")
+		got, err := db.GetDocument(ctx, "doc-1", "tenant-1")
 		if err != nil {
 			t.Fatalf("GetDocument failed: %v", err)
 		}
@@ -445,7 +483,7 @@ func TestContract_DBProvider_CRUDRoundTrips(t *testing.T) {
 		if err := db.UpsertHITLRequest(ctx, req); err != nil {
 			t.Fatalf("UpsertHITLRequest failed: %v", err)
 		}
-		got, err := db.GetHITLRequest(ctx, "hitl-1")
+		got, err := db.GetHITLRequest(ctx, "hitl-1", "tenant-1")
 		if err != nil {
 			t.Fatalf("GetHITLRequest failed: %v", err)
 		}
@@ -464,7 +502,7 @@ func TestContract_DBProvider_CRUDRoundTrips(t *testing.T) {
 		if err := db.UpsertHITLRequest(ctx, got); err != nil {
 			t.Fatalf("UpsertHITLRequest update failed: %v", err)
 		}
-		got2, _ := db.GetHITLRequest(ctx, "hitl-1")
+		got2, _ := db.GetHITLRequest(ctx, "hitl-1", "tenant-1")
 		if got2.Status != domain.HITLStatusApproved {
 			t.Errorf("Status after approve = %s, want APPROVED", got2.Status)
 		}
@@ -535,7 +573,9 @@ func (m *contractMockQueue) Enqueue(_ context.Context, qname string, msg any) (s
 }
 func (m *contractMockQueue) Dequeue(_ context.Context, qname string) (*providers.QueueMessage, error) {
 	q := m.queues[qname]
-	if len(q) == 0 { return nil, nil }
+	if len(q) == 0 {
+		return nil, nil
+	}
 	msg := q[0]
 	m.queues[qname] = q[1:]
 	return msg, nil
@@ -583,6 +623,152 @@ func TestContract_QueueProvider_EnqueueDequeueRoundTrip(t *testing.T) {
 		}
 		if err := q.Poison(ctx, "test-q", "msg-1"); err != nil {
 			t.Errorf("Poison returned error: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// In-memory TenantProvider Contract Tests
+// ---------------------------------------------------------------------------
+
+// contractMockTenantProvider implements providers.TenantProvider with in-memory maps.
+type contractMockTenantProvider struct {
+	tenants map[string]*domain.Tenant
+	slugs   map[string]*domain.Tenant
+}
+
+func newContractMockTenantProvider() *contractMockTenantProvider {
+	return &contractMockTenantProvider{
+		tenants: make(map[string]*domain.Tenant),
+		slugs:   make(map[string]*domain.Tenant),
+	}
+}
+
+func (m *contractMockTenantProvider) GetTenant(_ context.Context, id string) (*domain.Tenant, error) {
+	t, ok := m.tenants[id]
+	if !ok {
+		return nil, io.EOF
+	}
+	return t, nil
+}
+
+func (m *contractMockTenantProvider) GetTenantBySlug(_ context.Context, slug string) (*domain.Tenant, error) {
+	t, ok := m.slugs[slug]
+	if !ok {
+		return nil, io.EOF
+	}
+	return t, nil
+}
+
+func (m *contractMockTenantProvider) CreateTenant(_ context.Context, tenant *domain.Tenant) error {
+	m.tenants[tenant.ID] = tenant
+	m.slugs[tenant.Slug] = tenant
+	return nil
+}
+
+func (m *contractMockTenantProvider) ListTenants(_ context.Context) ([]*domain.Tenant, error) {
+	var result []*domain.Tenant
+	for _, t := range m.tenants {
+		result = append(result, t)
+	}
+	return result, nil
+}
+
+func (m *contractMockTenantProvider) UpdateTenantStatus(_ context.Context, id, status string) error {
+	t, ok := m.tenants[id]
+	if !ok {
+		return io.EOF
+	}
+	t.Status = status
+	return nil
+}
+
+func TestContract_TenantProvider_CRUD(t *testing.T) {
+	p := newContractMockTenantProvider()
+	ctx := context.Background()
+
+	t.Run("Create_and_GetTenant", func(t *testing.T) {
+		tenant := domain.NewTenant("tenant-c1", "Contract Corp", "contract-corp")
+		if err := p.CreateTenant(ctx, tenant); err != nil {
+			t.Fatalf("CreateTenant failed: %v", err)
+		}
+
+		got, err := p.GetTenant(ctx, "tenant-c1")
+		if err != nil {
+			t.Fatalf("GetTenant failed: %v", err)
+		}
+		if got.Name != "Contract Corp" {
+			t.Errorf("Name = %q, want Contract Corp", got.Name)
+		}
+		if got.Slug != "contract-corp" {
+			t.Errorf("Slug = %q, want contract-corp", got.Slug)
+		}
+		if got.Plan != "starter" {
+			t.Errorf("Plan = %q, want starter", got.Plan)
+		}
+		if got.Status != "active" {
+			t.Errorf("Status = %q, want active", got.Status)
+		}
+	})
+
+	t.Run("GetTenantBySlug", func(t *testing.T) {
+		got, err := p.GetTenantBySlug(ctx, "contract-corp")
+		if err != nil {
+			t.Fatalf("GetTenantBySlug failed: %v", err)
+		}
+		if got.ID != "tenant-c1" {
+			t.Errorf("ID = %q, want tenant-c1", got.ID)
+		}
+	})
+
+	t.Run("GetTenantBySlug_not_found", func(t *testing.T) {
+		_, err := p.GetTenantBySlug(ctx, "nonexistent")
+		if err == nil {
+			t.Fatal("expected error for unknown slug, got nil")
+		}
+	})
+
+	t.Run("ListTenants", func(t *testing.T) {
+		// Create a second tenant.
+		tenant2 := domain.NewTenant("tenant-c2", "Beta LLC", "beta-llc")
+		if err := p.CreateTenant(ctx, tenant2); err != nil {
+			t.Fatalf("CreateTenant failed: %v", err)
+		}
+
+		tenants, err := p.ListTenants(ctx)
+		if err != nil {
+			t.Fatalf("ListTenants failed: %v", err)
+		}
+		if len(tenants) != 2 {
+			t.Errorf("expected 2 tenants, got %d", len(tenants))
+		}
+	})
+
+	t.Run("UpdateTenantStatus", func(t *testing.T) {
+		if err := p.UpdateTenantStatus(ctx, "tenant-c1", "suspended"); err != nil {
+			t.Fatalf("UpdateTenantStatus failed: %v", err)
+		}
+
+		got, err := p.GetTenant(ctx, "tenant-c1")
+		if err != nil {
+			t.Fatalf("GetTenant after update failed: %v", err)
+		}
+		if got.Status != "suspended" {
+			t.Errorf("Status = %q, want suspended", got.Status)
+		}
+	})
+
+	t.Run("UpdateTenantStatus_not_found", func(t *testing.T) {
+		err := p.UpdateTenantStatus(ctx, "nonexistent", "suspended")
+		if err == nil {
+			t.Fatal("expected error for unknown tenant, got nil")
+		}
+	})
+
+	t.Run("GetTenant_not_found", func(t *testing.T) {
+		_, err := p.GetTenant(ctx, "nonexistent")
+		if err == nil {
+			t.Fatal("expected error for unknown tenant, got nil")
 		}
 	})
 }

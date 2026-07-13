@@ -15,12 +15,17 @@ import (
 func TestFullPipelineE2E(t *testing.T) {
 	baseURL := os.Getenv("E2E_BASE_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:9090"
+		baseURL = "http://localhost:8080"
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// 1. Health check
-	resp, err := client.Get(baseURL + "/health")
+	req, err := http.NewRequest("GET", baseURL+"/health", nil)
+	if err != nil {
+		t.Fatalf("Health check request: %v", err)
+	}
+	req.Header.Set("X-API-Key", "owner-dev-key")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Health check failed: %v", err)
 	}
@@ -41,12 +46,13 @@ func TestFullPipelineE2E(t *testing.T) {
 	fw.Write([]byte(content))
 	w.Close()
 
-	req, err := http.NewRequest("POST", baseURL+"/upload", &buf)
+	req, err = http.NewRequest("POST", baseURL+"/upload", &buf)
 	if err != nil {
 		t.Fatalf("Create upload request: %v", err)
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("X-Tenant-ID", "e2e-test")
+	req.Header.Set("X-Tenant-ID", "default")
+	req.Header.Set("X-API-Key", "owner-dev-key")
 
 	resp, err = client.Do(req)
 	if err != nil {
@@ -76,7 +82,8 @@ func TestFullPipelineE2E(t *testing.T) {
 		time.Sleep(1 * time.Second)
 
 		req, _ := http.NewRequest("GET", baseURL+"/jobs/"+uploadResp.JobID, nil)
-		req.Header.Set("X-Tenant-ID", "e2e-test")
+		req.Header.Set("X-Tenant-ID", "default")
+		req.Header.Set("X-API-Key", "owner-dev-key")
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatalf("Job status request failed: %v", err)

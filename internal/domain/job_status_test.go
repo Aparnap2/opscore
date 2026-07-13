@@ -28,7 +28,7 @@ func TestJobStatus_IsRetryable(t *testing.T) {
 
 func TestJobStatus_IsTerminal(t *testing.T) {
 	tests := []struct {
-		status    JobStatus
+		status     JobStatus
 		isTerminal bool
 	}{
 		{JobStatusPending, false},
@@ -52,7 +52,7 @@ func TestJobStatus_IsTerminal(t *testing.T) {
 
 func TestJobStatus_IsFailed(t *testing.T) {
 	tests := []struct {
-		status  JobStatus
+		status   JobStatus
 		isFailed bool
 	}{
 		{JobStatusPending, false},

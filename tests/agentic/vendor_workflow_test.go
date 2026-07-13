@@ -243,8 +243,8 @@ func TestVendorAgent_CleanAutoApprove(t *testing.T) {
 		VendorData: &agents.VendorData{
 			Name:        "Clean Vendor Pvt Ltd",
 			GSTNumber:   "22AAAAA0000A1Z5", // valid format per GSTRegex
-			PANNumber:   "ABCDE1234F",       // valid format per PANRegex
-			IFSCCode:    "SBIN0001234",      // valid format per IFSRegex
+			PANNumber:   "ABCDE1234F",      // valid format per PANRegex
+			IFSCCode:    "SBIN0001234",     // valid format per IFSRegex
 			BankAccount: "1234567890123456",
 			Address:     "123 Business Park, Mumbai",
 		},
@@ -293,7 +293,7 @@ func TestVendorAgent_CleanAutoApprove(t *testing.T) {
 	}
 
 	// --- Assert vendor saved to DB ---
-	savedVendor, err := infra.DB.GetVendor(ctx, jobID)
+	savedVendor, err := infra.DB.GetVendor(ctx, jobID, tenantID)
 	if err != nil {
 		t.Fatalf("GetVendor failed: %v", err)
 	}
@@ -356,9 +356,9 @@ func TestVendorAgent_HighRiskHITL(t *testing.T) {
 		JobID:    jobID,
 		VendorData: &agents.VendorData{
 			Name:      "Risky Vendor",
-			GSTNumber: "INVALID_GST_123",  // fails GSTRegex
-			PANNumber: "SHORT",             // fails PANRegex (not 10 chars)
-			IFSCCode:  "BAD",               // fails IFSRegex
+			GSTNumber: "INVALID_GST_123", // fails GSTRegex
+			PANNumber: "SHORT",           // fails PANRegex (not 10 chars)
+			IFSCCode:  "BAD",             // fails IFSRegex
 			Address:   "Unknown Location",
 		},
 	}
@@ -419,7 +419,7 @@ func TestVendorAgent_HighRiskHITL(t *testing.T) {
 	t.Logf("needs_hitl = %v (validation errors trigger HITL)", needsHITL)
 
 	// --- Assert HITLRequest created ---
-	hitlReq, err := infra.DB.GetHITLRequest(ctx, "hitl-"+jobID)
+	hitlReq, err := infra.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
 	if err != nil {
 		t.Fatalf("GetHITLRequest failed: %v", err)
 	}
@@ -464,11 +464,11 @@ func TestVendorAgent_LLMAnalysis(t *testing.T) {
 		TenantID: tenantID,
 		JobID:    jobID,
 		VendorData: &agents.VendorData{
-			Name:        "LLM Analyzed Vendor",
-			GSTNumber:   "22AAAAA0000A1Z5",
-			PANNumber:   "ABCDE1234F",
-			IFSCCode:    "SBIN0001234",
-			Documents:   []string{"report.pdf"}, // triggers LLM analysis path
+			Name:      "LLM Analyzed Vendor",
+			GSTNumber: "22AAAAA0000A1Z5",
+			PANNumber: "ABCDE1234F",
+			IFSCCode:  "SBIN0001234",
+			Documents: []string{"report.pdf"}, // triggers LLM analysis path
 		},
 	}
 
@@ -499,7 +499,7 @@ func TestVendorAgent_LLMAnalysis(t *testing.T) {
 	t.Logf("LLM analysis: %s", analysis)
 
 	// --- Assert vendor still saved ---
-	savedVendor, err := infra.DB.GetVendor(ctx, jobID)
+	savedVendor, err := infra.DB.GetVendor(ctx, jobID, tenantID)
 	if err != nil {
 		t.Fatalf("GetVendor after LLM analysis failed: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestVendorAgent_LLMErrorHandling(t *testing.T) {
 	}
 
 	// --- Assert vendor saved anyway ---
-	savedVendor, err := infra.DB.GetVendor(ctx, jobID)
+	savedVendor, err := infra.DB.GetVendor(ctx, jobID, tenantID)
 	if err != nil {
 		t.Fatalf("GetVendor failed after LLM error: %v", err)
 	}
