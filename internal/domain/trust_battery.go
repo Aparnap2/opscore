@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"math"
 	"time"
 )
 
@@ -46,12 +45,70 @@ func (tb *TrustBattery) RecordError() {
 	}
 }
 
-func (tb *TrustBattery) FlagFraud() {
-	tb.Tier = TrustTierProbation
+func (tb *TrustBattery) FraudFlagged() {
+	// FraudFlagged moves to BLOCKED (terminal state)
+	tb.Tier = TrustTierBlocked
 	tb.TrustScore = 0
 	tb.ConsecutiveSuccesses = 0
 	tb.ConsecutiveErrors = 0
 	tb.DaysInCurrentTier = 0
+}
+
+// AllChecksPass transitions from PROBATION to STANDARD
+// Should be called when all verification checks pass
+func (tb *TrustBattery) AllChecksPass() {
+	if tb.Tier == TrustTierProbation {
+		tb.Tier = TrustTierStandard
+		tb.TrustScore = 31 // Minimum score for STANDARD tier
+		tb.DaysInCurrentTier = 0
+	}
+}
+
+// TransactionThresholdMet transitions based on transaction count:
+// - 3 transactions: STANDARD → PREFERRED
+// - 10 transactions: PREFERRED → STRATEGIC
+func (tb *TrustBattery) TransactionThresholdMet(txCount int) {
+	if tb.Tier == TrustTierStandard && txCount >= 3 {
+		tb.Tier = TrustTierPreferred
+		tb.TrustScore = 61 // Minimum score for PREFERRED tier
+		tb.DaysInCurrentTier = 0
+	} else if tb.Tier == TrustTierPreferred && txCount >= 10 {
+		tb.Tier = TrustTierStrategic
+		tb.TrustScore = 86 // Minimum score for STRATEGIC tier
+		tb.DaysInCurrentTier = 0
+	}
+}
+
+// DisputeFiled triggers downgrade:
+// - PREFERRED → STANDARD
+// - STRATEGIC → PREFERRED
+func (tb *TrustBattery) DisputeFiled() {
+	if tb.Tier == TrustTierPreferred {
+		tb.Tier = TrustTierStandard
+		tb.TrustScore = 31 // Downgrade to STANDARD score range
+		tb.DaysInCurrentTier = 0
+	} else if tb.Tier == TrustTierStrategic {
+		tb.Tier = TrustTierPreferred
+		tb.TrustScore = 61 // Downgrade to PREFERRED score range
+		tb.DaysInCurrentTier = 0
+	}
+}
+
+// InactivityDecay triggers downgrade after 180 days of inactivity:
+// - STRATEGIC → PREFERRED
+// - PREFERRED → STANDARD
+func (tb *TrustBattery) InactivityDecay(days int) {
+	if days >= 180 {
+		if tb.Tier == TrustTierStrategic {
+			tb.Tier = TrustTierPreferred
+			tb.TrustScore = 61 // Downgrade to PREFERRED score range
+			tb.DaysInCurrentTier = 0
+		} else if tb.Tier == TrustTierPreferred {
+			tb.Tier = TrustTierStandard
+			tb.TrustScore = 31 // Downgrade to STANDARD score range
+			tb.DaysInCurrentTier = 0
+		}
+	}
 }
 
 func (tb *TrustBattery) AdvanceDays(days int) {
@@ -68,40 +125,39 @@ func (tb *TrustBattery) AdvanceDays(days int) {
 	}
 }
 
+// ScoreBasedTier returns the trust tier based on trust score
+func ScoreBasedTier(score int) TrustTier {
+	switch {
+	case score <= 30:
+		return TrustTierProbation
+	case score <= 60:
+		return TrustTierStandard
+	case score <= 85:
+		return TrustTierPreferred
+	default:
+		return TrustTierStrategic
+	}
+}
+
 func (tb *TrustBattery) tryUpgrade() bool {
-	upgradeRequirements := map[TrustTier]struct {
-		DaysRequired int
-		TxRequired   int
-	}{
-		TrustTierProbation: {30, 3},
-		TrustTierStandard:  {90, 10},
-		TrustTierCore:      {180, 0},
-		TrustTierStrategic: {math.MaxInt, math.MaxInt},
+	currentIdx := tb.tierIndex()
+	tiers := []TrustTier{TrustTierProbation, TrustTierStandard, TrustTierPreferred, TrustTierStrategic}
+	if currentIdx < len(tiers)-1 {
+		tb.Tier = tiers[currentIdx+1]
+		tb.DaysInCurrentTier = 0
+		tb.ConsecutiveSuccesses = 0
+		return true
 	}
-
-	req := upgradeRequirements[tb.Tier]
-
-	if tb.DaysInCurrentTier >= req.DaysRequired {
-		currentIdx := tb.tierIndex()
-		tiers := []TrustTier{TrustTierProbation, TrustTierStandard, TrustTierCore, TrustTierStrategic}
-		if currentIdx < len(tiers)-1 {
-			tb.Tier = tiers[currentIdx+1]
-			tb.DaysInCurrentTier = 0
-			tb.ConsecutiveSuccesses = 0
-			return true
-		}
-	}
-
 	return false
 }
 
 func (tb *TrustBattery) downgrade() {
-	if tb.Tier == TrustTierProbation {
+	if tb.Tier == TrustTierProbation || tb.Tier == TrustTierBlocked {
 		return
 	}
 
 	currentIdx := tb.tierIndex()
-	tiers := []TrustTier{TrustTierProbation, TrustTierStandard, TrustTierCore, TrustTierStrategic}
+	tiers := []TrustTier{TrustTierProbation, TrustTierStandard, TrustTierPreferred, TrustTierStrategic}
 	if currentIdx > 0 {
 		tb.Tier = tiers[currentIdx-1]
 		tb.ConsecutiveErrors = 0
@@ -120,7 +176,7 @@ func (tb *TrustBattery) ShouldDowngrade() bool {
 
 	if tb.LastActiveAt != nil {
 		daysInactive := int(time.Since(*tb.LastActiveAt).Hours() / 24)
-		if daysInactive >= 90 {
+		if daysInactive >= 180 {
 			return true
 		}
 	}
@@ -129,7 +185,7 @@ func (tb *TrustBattery) ShouldDowngrade() bool {
 }
 
 func (tb *TrustBattery) tierIndex() int {
-	tiers := []TrustTier{TrustTierProbation, TrustTierStandard, TrustTierCore, TrustTierStrategic}
+	tiers := []TrustTier{TrustTierProbation, TrustTierStandard, TrustTierPreferred, TrustTierStrategic, TrustTierBlocked}
 	for i, t := range tiers {
 		if t == tb.Tier {
 			return i

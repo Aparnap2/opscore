@@ -104,8 +104,9 @@ func (o *OCRAdapter) extractFromFile(ctx context.Context, fileData []byte, filen
 
 // extractFromURL attempts to extract from a URL - downloads and re-uploads
 func (o *OCRAdapter) extractFromURL(ctx context.Context, url string) (*providers.OCRResult, error) {
-	// Download the file from URL
-	resp, err := http.Get(url)
+	// Download the file from URL with a 30-second timeout
+	downloadClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := downloadClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("downloading file from URL: %w", err)
 	}
@@ -122,12 +123,10 @@ func (o *OCRAdapter) extractFromURL(ctx context.Context, url string) (*providers
 
 	// Extract filename from URL or use default
 	filename := "document.pdf"
-	if idx := len(url) - 1; idx > 0 {
-		if slashIdx := bytes.LastIndexByte([]byte(url), '/'); slashIdx > 0 {
-			filename = url[slashIdx+1:]
-			if !bytes.HasSuffix([]byte(filename), []byte(".pdf")) {
-				filename = "document.pdf"
-			}
+	if slashIdx := strings.LastIndex(url, "/"); slashIdx >= 0 && slashIdx < len(url)-1 {
+		candidate := url[slashIdx+1:]
+		if strings.HasSuffix(candidate, ".pdf") {
+			filename = candidate
 		}
 	}
 

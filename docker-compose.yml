@@ -1,0 +1,124 @@
+# OpsCore v3.0 - Full Stack (Production-Grade, Multi-Tenant)
+# Services: PostgreSQL 16, MinIO (S3), Redis 7, and the Go API server.
+#
+# No PubSub emulator — OpsCore uses Redis for queueing.
+# PostgreSQL init-db.sh seeds default + dev tenants for development.
+#
+# Usage:
+#   docker compose up -d                        # Start everything
+#   docker compose logs -f                      # Follow logs
+#   docker compose down                          # Stop and remove
+#   docker compose down -v                       # Stop and wipe volumes (data loss)
+#
+# Environment variables (copy .env.example to .env):
+#   cp .env.example .env  # then fill in secrets (SARVAM_API_KEY, SLACK_*, etc.)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opscore-postgres
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: opscore
+      POSTGRES_USER: opscore
+      POSTGRES_PASSWORD: opscore
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opscore -d opscore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [opscore-net]
+
+  minio:
+    image: minio/minio:latest
+    container_name: opscore-minio
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes: [minio-data:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [opscore-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: opscore-redis
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [opscore-net]
+
+  app:
+    build: .
+    container_name: opscore-app
+    ports: ["8080:8080"]
+    environment:
+      # Database
+      DATABASE_URL: postgres://opscore:opscore@postgres:5432/opscore?sslmode=disable
+
+      # S3-compatible storage (MinIO)
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_USE_SSL: "false"
+
+      # Queue (Redis — replaces PubSub)
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+
+      # AI providers (optional; omit in dev to skip)
+      SARVAM_API_KEY: ""
+
+      # Slack HITL (optional)
+      SLACK_BOT_TOKEN: ""
+      SLACK_SIGNING_SECRET: ""
+      SLACK_HITL_CHANNEL: ""
+
+      # API keys for dev authentication (three roles)
+      OWNER_API_KEY: owner-dev-key
+      OPS_ADMIN_API_KEY: ops-admin-dev-key
+      REVIEWER_API_KEY: reviewer-dev-key
+
+      # Server
+      PORT: "8080"
+      APP_ENV: development
+
+      # Rate limiting
+      RATE_LIMIT_RPS: "100"
+      RATE_LIMIT_BURST: "200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [opscore-net]
+
+networks:
+  opscore-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  minio-data:

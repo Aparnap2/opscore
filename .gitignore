@@ -8,10 +8,7 @@ bin/
 *.test
 *.out
 go.work
-handler
-handler.exe
-*.zip
-deploy.zip
+server
 
 # Python (legacy from v1)
 __pycache__/
@@ -39,7 +36,7 @@ wheels/
 .env
 .env.local
 .env.*.local
-local.settings.json
+config/live.env
 .venv
 venv/
 ENV/
@@ -63,3 +60,11 @@ htmlcov/
 # Logs & OS
 *.log
 .DS_Store
+
+# Azure Functions artifacts (legacy)
+handler
+handler.exe
+*.zip
+
+# opencode agent config
+.opencode/

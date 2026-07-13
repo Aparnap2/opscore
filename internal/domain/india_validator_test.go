@@ -8,7 +8,7 @@ func TestValidateAadhaar(t *testing.T) {
 	tests := []struct {
 		name    string
 		aadhaar string
-		valid  bool
+		valid   bool
 	}{
 		{"valid 12 digit", "123456789012", true},
 		{"valid all 9s", "999999999999", true},
@@ -30,8 +30,8 @@ func TestValidateAadhaar(t *testing.T) {
 
 func TestValidateUPI(t *testing.T) {
 	tests := []struct {
-		name string
-		upi  string
+		name  string
+		upi   string
 		valid bool
 	}{
 		{"valid UPI", "9876543210@upi", true},
@@ -79,9 +79,9 @@ func TestValidateBankAccount(t *testing.T) {
 
 func TestValidatePINCode(t *testing.T) {
 	tests := []struct {
-		name    string
-		pin    string
-		valid  bool
+		name  string
+		pin   string
+		valid bool
 	}{
 		{"valid PIN", "110001", true},
 		{"valid PIN 2", "500001", true},
@@ -128,7 +128,7 @@ func TestValidateStateCode(t *testing.T) {
 
 func TestExtractStateCodeFromGST(t *testing.T) {
 	tests := []struct {
-		name      string
+		name     string
 		gst      string
 		wantCode string
 	}{
@@ -150,9 +150,9 @@ func TestExtractStateCodeFromGST(t *testing.T) {
 
 func TestGetStateFromGST(t *testing.T) {
 	tests := []struct {
-		name    string
-		gst     string
-		want    string
+		name string
+		gst  string
+		want string
 	}{
 		{"Maharashtra", "27AABCS1209D1Z5", "Maharashtra"},
 		{"Delhi", "07AABCS1209D1Z5", "Delhi"},
@@ -188,5 +188,160 @@ func TestMapStateCodeToName(t *testing.T) {
 		} else if gotName != wantName {
 			t.Errorf("StateCodeToName[%s] = %q, want %q", code, gotName, wantName)
 		}
+	}
+}
+
+func TestIsValidGSTStateCode(t *testing.T) {
+	tests := []struct {
+		name  string
+		gst   string
+		valid bool
+	}{
+		{"valid Maharashtra GST", "27AABCS1209D1Z5", true},
+		{"valid Delhi GST", "07AABCS1209D1Z5", true},
+		{"invalid state code 00", "00AABCS1209D1Z5", false},
+		{"invalid state code 99", "99AABCS1209D1Z5", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsValidGSTStateCode(tt.gst)
+			if result != tt.valid {
+				t.Errorf("IsValidGSTStateCode(%q) = %v, want %v", tt.gst, result, tt.valid)
+			}
+		})
+	}
+}
+
+func TestIndiaValidator_ValidateVendor(t *testing.T) {
+	iv := NewIndiaValidator()
+
+	tests := []struct {
+		name         string
+		gst          string
+		pan          string
+		ifsc         string
+		wantValid    bool
+		wantErrCount int
+	}{
+		{"all valid", "27AABCS1209D1Z5", "AABCS1209D", "HDFC0CGBIBL", true, 0},
+		{"invalid GST", "INVALID", "AABCS1209D", "HDFC0CGBIBL", false, 1},
+		{"invalid PAN", "27AABCS1209D1Z5", "BADPAN", "HDFC0CGBIBL", false, 1},
+		{"invalid IFSC", "27AABCS1209D1Z5", "AABCS1209D", "BADIFSC", false, 1},
+		{"all invalid", "INVALID", "BADPAN", "BADIFSC", false, 3},
+		{"all empty", "", "", "", true, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := iv.ValidateVendor(tt.gst, tt.pan, tt.ifsc)
+			if result.Valid != tt.wantValid {
+				t.Errorf("ValidateVendor().Valid = %v, want %v", result.Valid, tt.wantValid)
+			}
+			if len(result.Errors) != tt.wantErrCount {
+				t.Errorf("ValidateVendor() error count = %d, want %d. Errors: %v", len(result.Errors), tt.wantErrCount, result.Errors)
+			}
+		})
+	}
+}
+
+func TestIndiaValidator_ValidateAll(t *testing.T) {
+	iv := NewIndiaValidator()
+
+	tests := []struct {
+		name         string
+		kvs          map[string]string
+		wantValid    bool
+		wantErrCount int
+	}{
+		{
+			name: "all valid",
+			kvs: map[string]string{
+				"gst":  "27AABCS1209D1Z5",
+				"pan":  "AABCS1209D",
+				"ifsc": "HDFC0CGBIBL",
+			},
+			wantValid:    true,
+			wantErrCount: 0,
+		},
+		{
+			name: "all invalid",
+			kvs: map[string]string{
+				"gst":  "INVALID",
+				"pan":  "BADPAN",
+				"ifsc": "BADIFSC",
+			},
+			wantValid:    false,
+			wantErrCount: 3,
+		},
+		{
+			name:         "empty map",
+			kvs:          map[string]string{},
+			wantValid:    true,
+			wantErrCount: 0,
+		},
+		{
+			name: "only GST",
+			kvs: map[string]string{
+				"gst": "27AABCS1209D1Z5",
+			},
+			wantValid:    true,
+			wantErrCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := iv.ValidateAll(tt.kvs)
+			if result.Valid != tt.wantValid {
+				t.Errorf("ValidateAll().Valid = %v, want %v", result.Valid, tt.wantValid)
+			}
+			if len(result.Errors) != tt.wantErrCount {
+				t.Errorf("ValidateAll() error count = %d, want %d. Errors: %v", len(result.Errors), tt.wantErrCount, result.Errors)
+			}
+		})
+	}
+}
+
+func TestValidationResult_HasErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ValidationResult
+		want bool
+	}{
+		{"with errors", &ValidationResult{Errors: []string{"err1"}}, true},
+		{"no errors", &ValidationResult{Errors: []string{}}, false},
+		{"nil errors", &ValidationResult{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.r.HasErrors()
+			if got != tt.want {
+				t.Errorf("HasErrors() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidationResult_HasWarnings(t *testing.T) {
+	tests := []struct {
+		name string
+		r    *ValidationResult
+		want bool
+	}{
+		{"with warnings", &ValidationResult{Warnings: []string{"warn1"}}, true},
+		{"no warnings", &ValidationResult{Warnings: []string{}}, false},
+		{"nil warnings", &ValidationResult{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.r.HasWarnings()
+			if got != tt.want {
+				t.Errorf("HasWarnings() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

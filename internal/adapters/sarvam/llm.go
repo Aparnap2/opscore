@@ -172,7 +172,7 @@ func (l *LLMAdapter) Reason(ctx context.Context, prompt string) (string, error) 
 }
 
 // Chat sends a chat completion request
-func (l *LLMAdapter) Chat(ctx context.Context, messages []providers.ChatMessage) (string, error) {
+func (l *LLMAdapter) Chat(ctx context.Context, messages []providers.ChatMessage) (string, *json.RawMessage, error) {
 	type request struct {
 		Model    string                  `json:"model"`
 		Messages []providers.ChatMessage `json:"messages"`
@@ -191,13 +191,13 @@ func (l *LLMAdapter) Chat(ctx context.Context, messages []providers.ChatMessage)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("marshaling request: %w", err)
+		return "", nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/v1/chat/completions", l.config.BaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+		return "", nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -206,25 +206,25 @@ func (l *LLMAdapter) Chat(ctx context.Context, messages []providers.ChatMessage)
 
 	resp, err := l.client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("calling LLM: %w", err)
+		return "", nil, fmt.Errorf("calling LLM: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error: %d - %s", resp.StatusCode, string(respBody))
+		return "", nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, string(respBody))
 	}
 
 	var chatResp response
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", fmt.Errorf("decoding response: %w", err)
+		return "", nil, fmt.Errorf("decoding response: %w", err)
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no response from LLM")
+		return "", nil, fmt.Errorf("no response from LLM")
 	}
 
-	return chatResp.Choices[0].Message.Content, nil
+	return chatResp.Choices[0].Message.Content, nil, nil
 }
 
 var _ providers.LLMProvider = (*LLMAdapter)(nil)
@@ -233,7 +233,7 @@ var _ providers.LLMProvider = (*LLMAdapter)(nil)
 type LLMAdapterMock struct {
 	ExtractFieldsFunc func(ctx context.Context, text string, schema any) (json.RawMessage, float64, error)
 	ReasonFunc        func(ctx context.Context, prompt string) (string, error)
-	ChatFunc          func(ctx context.Context, messages []providers.ChatMessage) (string, error)
+	ChatFunc          func(ctx context.Context, messages []providers.ChatMessage) (string, *json.RawMessage, error)
 }
 
 func (m *LLMAdapterMock) ExtractFields(ctx context.Context, text string, schema any) (json.RawMessage, float64, error) {
@@ -250,11 +250,11 @@ func (m *LLMAdapterMock) Reason(ctx context.Context, prompt string) (string, err
 	return "mocked reasoning", nil
 }
 
-func (m *LLMAdapterMock) Chat(ctx context.Context, messages []providers.ChatMessage) (string, error) {
+func (m *LLMAdapterMock) Chat(ctx context.Context, messages []providers.ChatMessage) (string, *json.RawMessage, error) {
 	if m.ChatFunc != nil {
 		return m.ChatFunc(ctx, messages)
 	}
-	return "mocked response", nil
+	return "mocked response", nil, nil
 }
 
 var _ providers.LLMProvider = (*LLMAdapterMock)(nil)

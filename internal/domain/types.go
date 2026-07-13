@@ -9,8 +9,9 @@ type TrustTier string
 const (
 	TrustTierProbation TrustTier = "PROBATION"
 	TrustTierStandard  TrustTier = "STANDARD"
-	TrustTierCore      TrustTier = "CORE"
+	TrustTierPreferred TrustTier = "PREFERRED"
 	TrustTierStrategic TrustTier = "STRATEGIC"
+	TrustTierBlocked   TrustTier = "BLOCKED"
 )
 
 type RiskTier string
@@ -29,17 +30,51 @@ const (
 	WorkflowCompliance        WorkflowType = "COMPLIANCE"
 )
 
+type HITLRequestStatus string
+
+const (
+	HITLStatusPending  HITLRequestStatus = "PENDING"
+	HITLStatusApproved HITLRequestStatus = "APPROVED"
+	HITLStatusRejected HITLRequestStatus = "REJECTED"
+)
+
 type JobStatus string
 
 const (
-	JobStatusPending      JobStatus = "PENDING"
-	JobStatusRunning      JobStatus = "RUNNING"
-	JobStatusCompleted    JobStatus = "COMPLETED"
-	JobStatusFailed       JobStatus = "FAILED"
-	JobStatusAwaitingHITL JobStatus = "AWAITING_HITL"
+	JobStatusPending         JobStatus = "PENDING"
+	JobStatusQueued          JobStatus = "QUEUED"
+	JobStatusProcessing      JobStatus = "PROCESSING"
+	JobStatusCompleted       JobStatus = "COMPLETED"
+	JobStatusFailed          JobStatus = "FAILED"           // legacy - treat as terminal
+	JobStatusRetryableFailed JobStatus = "RETRYABLE_FAILED" // can retry
+	JobStatusTerminalFailed  JobStatus = "TERMINAL_FAILED"  // won't retry
+	JobStatusDeadLettered    JobStatus = "DEAD_LETTERED"    // exceeded max retries
+	JobStatusAwaitingHITL    JobStatus = "AWAITING_HITL"
 )
 
+// IsRetryable returns true if the job status allows retry
+func (s JobStatus) IsRetryable() bool {
+	return s == JobStatusRetryableFailed
+}
+
+// IsTerminal returns true if the job status is final and won't change
+func (s JobStatus) IsTerminal() bool {
+	return s == JobStatusCompleted ||
+		s == JobStatusFailed ||
+		s == JobStatusTerminalFailed ||
+		s == JobStatusDeadLettered
+}
+
+// IsFailed returns true if the job status indicates failure
+func (s JobStatus) IsFailed() bool {
+	return s == JobStatusFailed ||
+		s == JobStatusRetryableFailed ||
+		s == JobStatusTerminalFailed ||
+		s == JobStatusDeadLettered
+}
+
 type AuditEvent struct {
+	ID            string    `json:"id,omitempty"`
 	TenantID      string    `json:"tenant_id"`
 	Actor         string    `json:"actor"`
 	Action        string    `json:"action"`
@@ -48,6 +83,7 @@ type AuditEvent struct {
 	OldState      string    `json:"old_state,omitempty"`
 	NewState      string    `json:"new_state,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
+	Error         string    `json:"error,omitempty"`
 	TraceID       string    `json:"trace_id,omitempty"`
 	CorrelationID string    `json:"correlation_id,omitempty"`
 }
@@ -64,6 +100,41 @@ type Job struct {
 	Input         interface{}  `json:"input,omitempty"`
 	Output        interface{}  `json:"output,omitempty"`
 	Error         string       `json:"error,omitempty"`
+	// Batch job fields for bundle splitting
+	ParentBatchID string `json:"parent_batch_id,omitempty"` // for child jobs
+	IsChildJob    bool   `json:"is_child_job,omitempty"`
+	// PRD v4.0 fields
+	BlobURL      string      `json:"blob_url,omitempty"`
+	DocumentType string      `json:"document_type,omitempty"`
+	Confidence   float64     `json:"confidence,omitempty"`
+	Extracted    interface{} `json:"extracted_data,omitempty"`
+	RiskFlags    []string    `json:"risk_flags,omitempty"`
+	HITLReason   string      `json:"hitl_reason,omitempty"`
+	Version      int         `json:"version"`
+}
+
+// ComplianceChunk represents a chunk of a document for compliance processing
+type ComplianceChunk struct {
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	SourceURL    string    `json:"source_url"`
+	SourceHash   string    `json:"source_hash"`
+	Content      string    `json:"content"`
+	ChunkIndex   int       `json:"chunk_index"`
+	Severity     string    `json:"severity"`
+	CreatedAt    time.Time `json:"created_at"`
+	DocumentType string    `json:"document_type,omitempty"`
+	PageNumber   int       `json:"page_number,omitempty"`
+}
+
+type ComplianceRecord struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	SourceURL string    `json:"source_url"`
+	Gap       string    `json:"gap"`
+	Severity  string    `json:"severity"`
+	Score     float64   `json:"score"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Vendor struct {
@@ -80,6 +151,10 @@ type Vendor struct {
 	TenantID     string       `json:"tenant_id"`
 	RiskScore    int          `json:"risk_score"`
 	Approved     bool         `json:"approved"`
+	// PRD v4.0 fields
+	RiskFlags         []string   `json:"risk_flags,omitempty"`
+	Status            string     `json:"status,omitempty"`
+	LastTransactionAt *time.Time `json:"last_transaction_at,omitempty"`
 }
 
 type Document struct {
@@ -92,16 +167,18 @@ type Document struct {
 	FileName    string      `json:"file_name"`
 	StoragePath string      `json:"storage_path"`
 	Status      string      `json:"status"`
+	ContentHash string      `json:"content_hash,omitempty"`
 }
 
 type HITLRequest struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	ApprovedAt *time.Time `json:"approved_at,omitempty"`
-	ID         string     `json:"id"`
-	TenantID   string     `json:"tenant_id"`
-	JobID      string     `json:"job_id"`
-	Type       string     `json:"type"`
-	Message    string     `json:"message"`
-	Status     string     `json:"status"`
-	ApprovedBy string     `json:"approved_by,omitempty"`
+	ID          string            `json:"id"`
+	TenantID    string            `json:"tenant_id"`
+	JobID       string            `json:"job_id"`
+	Reason      string            `json:"reason"`
+	Status      HITLRequestStatus `json:"status"`
+	SentAt      time.Time         `json:"sent_at"`
+	RespondedAt *time.Time        `json:"responded_at,omitempty"`
+	Responder   string            `json:"responder,omitempty"`
+	Decision    string            `json:"decision,omitempty"`
+	SlackTS     string            `json:"slack_ts,omitempty"`
 }

@@ -49,78 +49,85 @@ func ValidateIFSC(ifsc string) bool {
 }
 
 // ComputeVendorRisk calculates the risk score and tier for a vendor
+// PRD v3.0 Spec (Section 8):
+// - Base score: 50
+// - Valid GST: +15
+// - Valid PAN: +10
+// - Valid IFSC: +10
+// - Duplicate GST in system: -40
+// - Active dispute flag: -20 (using !Approved as proxy)
+// - Incomplete documents: -15 (no PAN or no GST)
 func ComputeVendorRisk(vendor *Vendor, existingVendors []*Vendor, blacklist []string, tenantID string) *RiskResult {
-	score := 0
+	score := 50 // Base score per PRD v3.0 spec
 	var flags []string
 
 	gst := vendor.GSTNumber
 	pan := vendor.PANNumber
 	ifsc := vendor.IFSCCode
-	bankAccount := vendor.BankAccount
-	name := vendor.Name
 
-	// Validate GST format
-	if !ValidateGST(gst) {
-		score += 25
-		flags = append(flags, "INVALID_GST_FORMAT")
-	}
-
-	// Validate PAN format
-	if !ValidatePAN(pan) {
-		score += 20
-		flags = append(flags, "INVALID_PAN_FORMAT")
-	}
-
-	// Validate IFSC format
-	if ifsc != "" && !ValidateIFSC(ifsc) {
+	// Add points for valid credentials (per PRD spec)
+	// Valid GST: +15
+	if ValidateGST(gst) {
 		score += 15
-		flags = append(flags, "INVALID_IFSC_FORMAT")
+		flags = append(flags, "VALID_GST")
 	}
 
-	// Check blacklist
-	for _, blocked := range blacklist {
-		if gst == blocked || pan == blocked {
-			score += 50
-			flags = append(flags, "BLACKLISTED_ENTITY")
-			break
-		}
+	// Valid PAN: +10
+	if ValidatePAN(pan) {
+		score += 10
+		flags = append(flags, "VALID_PAN")
 	}
 
-	// Check duplicate bank accounts
-	if bankAccount != "" {
+	// Valid IFSC: +10
+	if ifsc != "" && ValidateIFSC(ifsc) {
+		score += 10
+		flags = append(flags, "VALID_IFSC")
+	}
+
+	// Check duplicate GST in system: -40
+	if gst != "" {
 		for _, ev := range existingVendors {
-			if ev.BankAccount == bankAccount && ev.TenantID == tenantID {
-				score += 40
-				flags = append(flags, "DUPLICATE_BANK_ACCOUNT:"+ev.ID)
+			if ev.ID == vendor.ID {
+				continue
+			}
+			if ev.GSTNumber == gst && ev.TenantID == tenantID {
+				score -= 40
+				flags = append(flags, "DUPLICATE_GST:"+ev.ID)
 				break
 			}
 		}
 	}
 
-	// Check similar vendor names (simple fuzzy matching)
-	if name != "" && len(existingVendors) > 0 {
-		for _, ev := range existingVendors {
-			if ev.ID == vendor.ID {
-				continue
-			}
-			existingName := ev.Name
-			if existingName != "" {
-				similarity := fuzzyMatch(name, existingName)
-				if similarity > 85 {
-					score += 20
-					flags = append(flags, "SIMILAR_VENDOR_NAME:"+ev.ID)
-					break
-				}
-			}
-		}
+	// Active dispute flag: -20 (vendor not approved indicates potential dispute)
+	if !vendor.Approved {
+		score -= 20
+		flags = append(flags, "NOT_APPROVED")
 	}
 
-	// Determine tier based on score
+	// Incomplete documents: -15 (no valid PAN AND no valid GST)
+	// Only penalize if both PAN and GST are missing/invalid
+	if !ValidatePAN(pan) && !ValidateGST(gst) {
+		score -= 15
+		flags = append(flags, "INCOMPLETE_DOCUMENTS")
+	}
+
+	// Clamp score between 0-100
+	if score > 100 {
+		score = 100
+	}
+	if score < 0 {
+		score = 0
+	}
+
+	// Determine tier based on score (inverted from before)
+	// Lower score = higher risk in this new model
 	tier := RiskTierLow
-	if score >= 60 {
-		tier = RiskTierHigh
-	} else if score >= 30 {
-		tier = RiskTierMedium
+	if score >= 70 {
+		tier = RiskTierLow // High trust
+	} else if score >= 40 {
+		tier = RiskTierMedium // Medium trust
+	} else {
+		tier = RiskTierHigh // Low trust
 	}
 
 	return &RiskResult{
@@ -128,40 +135,4 @@ func ComputeVendorRisk(vendor *Vendor, existingVendors []*Vendor, blacklist []st
 		Tier:  tier,
 		Flags: flags,
 	}
-}
-
-// fuzzyMatch returns a simple similarity score (0-100)
-// This is a basic implementation without external dependencies
-func fuzzyMatch(s1, s2 string) int {
-	if len(s1) == 0 || len(s2) == 0 {
-		return 0
-	}
-
-	// Count matching characters at same positions
-	matches := 0
-	runes1 := []rune(s1)
-	runes2 := []rune(s2)
-	minLen := len(runes1)
-	if len(runes2) < minLen {
-		minLen = len(runes2)
-	}
-
-	for i := 0; i < minLen; i++ {
-		c1, c2 := runes1[i], runes2[i]
-		// Case-insensitive match
-		if c1 == c2 {
-			matches++
-		} else if c1 >= 'A' && c1 <= 'Z' && c1+32 == c2 {
-			matches++
-		} else if c2 >= 'A' && c2 <= 'Z' && c2+32 == c1 {
-			matches++
-		}
-	}
-
-	// Return similarity as percentage
-	total := len(runes1) + len(runes2)
-	if total == 0 {
-		return 0
-	}
-	return (matches * 200) / total
 }

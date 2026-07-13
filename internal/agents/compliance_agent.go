@@ -48,9 +48,11 @@ type ComplianceItem struct {
 func NewComplianceAgent(
 	db providers.DBProvider,
 	validator *domain.IndiaValidator,
+	llm providers.LLMProvider,
 ) *ComplianceAgent {
 	return &ComplianceAgent{
 		db:         db,
+		llm:        llm,
 		validator:  validator,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
@@ -73,7 +75,6 @@ type ScrapeResult struct {
 }
 
 // FetchRegulatoryUpdate fetches updates from a regulatory source
-// TOOL: fetch_regulatory_update
 func (a *ComplianceAgent) FetchRegulatoryUpdate(ctx context.Context, source *ComplianceSource) (*ScrapeResult, error) {
 	// Simple HTTP fetch and extract
 	resp, err := a.httpClient.Get(source.URL)
@@ -127,7 +128,6 @@ func (a *ComplianceAgent) chunkText(text string, size int) []string {
 }
 
 // StoreComplianceChunks stores extracted chunks
-// TOOL: store_compliance_chunks
 func (a *ComplianceAgent) StoreComplianceChunks(ctx context.Context, result *ScrapeResult) error {
 	for i, chunk := range result.Chunks {
 		doc := &domain.Document{
@@ -151,7 +151,6 @@ func (a *ComplianceAgent) StoreComplianceChunks(ctx context.Context, result *Scr
 }
 
 // AnalyzeCompliance performs gap analysis using LLM
-// TOOL: analyze_compliance
 func (a *ComplianceAgent) AnalyzeCompliance(ctx context.Context, policyContext string, updates []string) (string, error) {
 	if a.llm == nil {
 		return "LLM not configured", nil
@@ -179,7 +178,6 @@ func (a *ComplianceAgent) AnalyzeCompliance(ctx context.Context, policyContext s
 }
 
 // DetectChanges detects meaningful changes from previous content
-// TOOL: detect_changes
 func (a *ComplianceAgent) DetectChanges(ctx context.Context, oldContent, newContent string) ([]string, error) {
 	// Simple diff detection
 	oldLines := strings.Split(oldContent, "\n")
@@ -202,7 +200,6 @@ func (a *ComplianceAgent) DetectChanges(ctx context.Context, oldContent, newCont
 }
 
 // ClassifySeverity determines the severity of a compliance update
-// TOOL: classify_severity
 func (a *ComplianceAgent) ClassifySeverity(ctx context.Context, title, content string) (string, error) {
 	title = strings.ToLower(title)
 	content = strings.ToLower(content)
@@ -226,16 +223,14 @@ func (a *ComplianceAgent) ClassifySeverity(ctx context.Context, title, content s
 }
 
 // CreateTicket creates a compliance ticket
-// TOOL: create_ticket
 func (a *ComplianceAgent) CreateTicket(ctx context.Context, tenantID, title, description, severity string) error {
 	ticket := &domain.HITLRequest{
-		ID:        fmt.Sprintf("ticket-%d", time.Now().Unix()),
-		TenantID:  tenantID,
-		JobID:     title,
-		Type:      "COMPLIANCE_TICKET",
-		Message:   description,
-		Status:    severity, // Use as severity marker
-		CreatedAt: time.Now(),
+		ID:       fmt.Sprintf("ticket-%d", time.Now().Unix()),
+		TenantID: tenantID,
+		JobID:    title,
+		Reason:   description,
+		Status:   domain.HITLRequestStatus(severity), // Use as severity marker
+		SentAt:   time.Now(),
 	}
 
 	return a.db.UpsertHITLRequest(ctx, ticket)

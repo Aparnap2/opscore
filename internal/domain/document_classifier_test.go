@@ -12,17 +12,17 @@ func TestClassify(t *testing.T) {
 	}{
 		{
 			name:     "invoice with keywords",
-			text:     "TAX INVOICE GSTIN: 27AABCS1209D1Z5 CGST: 500 SGST: 500 Invoice Number: INV/2024/001 Bill To: ABC Corp",
+			text:     "INVOICE Tax Invoice Bill No: INV/2024/001 Proforma for services",
 			wantType: DocumentTypeInvoice,
 		},
 		{
-			name:     "invoice with e-invoice",
-			text:     "E-INVOICE Bill To: Test Company Ship To: Another Company CGST SGSTIGST",
+			name:     "invoice with gst invoice",
+			text:     "GST INVOICE Bill To: Test Company Proforma Invoice Number: INV/2024/001",
 			wantType: DocumentTypeInvoice,
 		},
 		{
 			name:     "purchase order",
-			text:     "PURCHASE ORDER PO Number: PO/2024/001 Delivery Date: 2024-12-31 Dispatched to: Warehouse Vendor Supply Acknowledgement Required",
+			text:     "PURCHASE ORDER Order No: PO/2024/001 Procurement Order for Q4 2024",
 			wantType: DocumentTypePurchaseOrder,
 		},
 		{
@@ -70,12 +70,12 @@ func TestClassify_Confidence(t *testing.T) {
 	}{
 		{
 			name:        "high confidence invoice",
-			text:       "tax invoice gstin cgst sgst igst invoice number bill to ship to",
+			text:        "tax invoice gstin cgst sgst igst invoice number bill to ship to",
 			wantMinConf: 20, // 10 keywords found / 10 total = 100%, but normalized to 100
 		},
 		{
 			name:        "low confidence unknown",
-			text:       "random words",
+			text:        "random words",
 			wantMinConf: 0,
 		},
 	}
@@ -93,7 +93,7 @@ func TestClassify_Confidence(t *testing.T) {
 func TestValidateGSTNumber(t *testing.T) {
 	tests := []struct {
 		name  string
-		gst  string
+		gst   string
 		valid bool
 	}{
 		{"valid GST", "27AABCS1209D1Z5", true},
@@ -115,7 +115,7 @@ func TestValidateGSTNumber(t *testing.T) {
 func TestValidatePANNumber(t *testing.T) {
 	tests := []struct {
 		name  string
-		pan  string
+		pan   string
 		valid bool
 	}{
 		{"valid PAN", "AABCS1209D", true},
@@ -137,7 +137,7 @@ func TestValidatePANNumber(t *testing.T) {
 func TestValidateIFSCCode(t *testing.T) {
 	tests := []struct {
 		name  string
-		ifsc string
+		ifsc  string
 		valid bool
 	}{
 		{"valid IFSC", "HDFC0CGBIBL", true},

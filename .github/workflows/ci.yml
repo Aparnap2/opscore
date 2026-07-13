@@ -1,10 +1,12 @@
-# OpsCore v2.0 - CI Pipeline
-# 
+# OpsCore v3.0 - CI Pipeline
+#
 # Runs on: push to main, feature branches, and PRs
-# 
+#
 # Jobs:
-#   - unit: golangci-lint + unit tests (no external services)
+#   - quality: golangci-lint + go vet + python syntax check
+#   - unit: unit tests + build (no external services)
 #   - integration: docker services + integration tests with -tags integration
+#   - python-lint: Streamlit UI syntax validation
 
 name: CI
 
@@ -14,18 +16,22 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   GO_VERSION: '1.25'
   GOLANGCI_LINT_VERSION: v2.1.2
 
 jobs:
   # =======================================================================
-  # Unit Tests - No external services required
+  # Quality Gate – Lint, vet, and syntax check (fastest feedback)
   # =======================================================================
-  unit:
-    name: Unit Tests
+  quality:
+    name: Quality Gate
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,6 +47,31 @@ jobs:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout=5m
 
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Python syntax check
+        run: |
+          python3 -m py_compile ops-ui/app.py
+          python3 -m py_compile ops-ui/config.py
+
+  # =======================================================================
+  # Unit Tests - No external services required
+  # =======================================================================
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [quality]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
       - name: Run unit tests
         run: go test ./internal/domain/... -v -race
 
@@ -54,32 +85,45 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     needs: [unit]
-    
+
     services:
-      # Cosmos DB emulator
-      cosmos:
-        image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+      postgres:
+        image: postgres:16-alpine
         ports:
-          8081:8081
-          1234:1234
-        options: --memory 4g
-
-      # Azurite blob/queue storage
-      azurite:
-        image: mcr.microsoft.com/azure-storage/azurite:latest
-        ports:
-          10000:10000
-          10001:10001
-
-      # Mockoon slack mock
-      mockoon:
-        image: mockoon/cli:latest
-        ports:
-          3100:3100
+          5432:5432
         env:
-          MOCK_OON_CLI_ARGS: --port 3100 --data /data/slack_mock.json
-        volumes:
-          ./tests/mockoon:/data
+          POSTGRES_DB: opscore
+          POSTGRES_USER: opscore
+          POSTGRES_PASSWORD: opscore
+        options: >-
+          --health-cmd "pg_isready -U opscore -d opscore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      minio:
+        image: minio/minio:latest
+        ports:
+          9000:9000
+          9001:9001
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -90,44 +134,18 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Set up Docker Compose
-        uses: add-jewelry/installer-action@v1
-        with:
-          version: v2.14.0
-
-      - name: Start Docker services
-        run: docker compose -f docker-compose.test.yml up -d
-
-      - name: Wait for services
-        run: |
-          echo "Waiting for Cosmos..."
-          sleep 30
-          echo "Waiting for Azurite..."
-          sleep 5
-          echo "Waiting for Mockoon..."
-          for i in {1..30}; do
-            if curl -sf http://localhost:3100/health > /dev/null 2>&1; then
-              echo "Mockoon ready"
-              break
-            fi
-            sleep 1
-          done
-
       - name: Run integration tests
-        run: |
-          go test ./internal/adapters/... ./internal/providers/... \
-            -tags integration \
-            -v -race \
-            -count=1
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-logs
-          path: |
-            docker compose -f docker-compose.test.yml logs -- nohup
-
-      - name: Stop Docker services
-        if: always()
-        run: docker compose -f docker-compose.test.yml down -v
+        run: go test ./tests/... -v -tags integration -timeout 300s
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: opscore
+          POSTGRES_USER: opscore
+          POSTGRES_PASSWORD: opscore
+          S3_ENDPOINT: localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_USE_SSL: "false"
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          APP_ENV: ci

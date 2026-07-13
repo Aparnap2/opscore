@@ -30,12 +30,13 @@ type TableData struct {
 type LLMProvider interface {
 	ExtractFields(ctx context.Context, text string, schema any) (json.RawMessage, float64, error)
 	Reason(ctx context.Context, prompt string) (string, error)
-	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+	Chat(ctx context.Context, messages []ChatMessage) (string, *json.RawMessage, error)
 }
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string           `json:"role"`
+	Content          string           `json:"content"`
+	ReasoningDetails *json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 type StorageProvider interface {
@@ -66,38 +67,50 @@ type QueueMessage struct {
 
 type DBProvider interface {
 	UpsertJob(ctx context.Context, job *domain.Job) error
-	GetJob(ctx context.Context, id string) (*domain.Job, error)
+	GetJob(ctx context.Context, id, tenantID string) (*domain.Job, error)
 	ListJobs(ctx context.Context, tenantID string, workflowType domain.WorkflowType, status domain.JobStatus) ([]*domain.Job, error)
 
 	UpsertVendor(ctx context.Context, vendor *domain.Vendor) error
-	GetVendor(ctx context.Context, id string) (*domain.Vendor, error)
+	GetVendor(ctx context.Context, id, tenantID string) (*domain.Vendor, error)
 	ListVendors(ctx context.Context, tenantID string) ([]*domain.Vendor, error)
 
 	UpsertDocument(ctx context.Context, doc *domain.Document) error
-	GetDocument(ctx context.Context, id string) (*domain.Document, error)
+	GetDocument(ctx context.Context, id, tenantID string) (*domain.Document, error)
+	FindBySHA256(ctx context.Context, tenantID, contentHash string) (*domain.Document, error)
 
 	UpsertHITLRequest(ctx context.Context, req *domain.HITLRequest) error
-	GetHITLRequest(ctx context.Context, id string) (*domain.HITLRequest, error)
+	GetHITLRequest(ctx context.Context, id, tenantID string) (*domain.HITLRequest, error)
 	ListPendingHITL(ctx context.Context, tenantID string) ([]*domain.HITLRequest, error)
+	ListHITLRequests(ctx context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error)
 
 	AppendAuditEvent(ctx context.Context, event *domain.AuditEvent) error
 	ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error)
 
-	VectorSearch(ctx context.Context, collection string, embedding []float32, topK int) ([]VectorMatch, error)
-
-	// Queue operations (optional)
-	QueueEnqueue(ctx context.Context, queueName string, message any) (string, error)
+	// Ops endpoints
+	GetRecentJobs(ctx context.Context, tenantID string, limit int) ([]*domain.Job, error)
+	GetRiskyVendors(ctx context.Context, tenantID string) ([]*domain.Vendor, error)
+	GetRecentCompliance(ctx context.Context, tenantID string, limit int) ([]*domain.ComplianceRecord, error)
 }
 
-type VectorMatch struct {
-	Payload map[string]interface{} `json:"payload"`
-	ID      string                 `json:"id"`
-	Score   float64                `json:"score"`
+type TenantProvider interface {
+	GetTenant(ctx context.Context, id string) (*domain.Tenant, error)
+	GetTenantBySlug(ctx context.Context, slug string) (*domain.Tenant, error)
+	CreateTenant(ctx context.Context, tenant *domain.Tenant) error
+	ListTenants(ctx context.Context) ([]*domain.Tenant, error)
+	UpdateTenantStatus(ctx context.Context, id, status string) error
 }
 
 type HITLProvider interface {
 	SendApprovalRequest(ctx context.Context, req *domain.HITLRequest) error
 	SendMessage(ctx context.Context, tenantID, message string) error
+}
+
+// UsageProvider defines the interface for tracking and checking tenant usage limits.
+type UsageProvider interface {
+	IncrementUsage(ctx context.Context, tenantID string, metric domain.Metric, delta int64) error
+	GetUsage(ctx context.Context, tenantID string, metric domain.Metric) (int64, error)
+	GetCurrentPeriodUsage(ctx context.Context, tenantID string) (map[domain.Metric]int64, error)
+	CheckLimit(ctx context.Context, tenantID string, metric domain.Metric) (bool, int64, int64, error)
 }
 
 type TracingProvider interface {
