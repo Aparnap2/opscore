@@ -64,6 +64,7 @@ const (
 	QueueDocument   = "document-queue"
 	QueueVendor     = "vendor-queue"
 	QueueCompliance = "compliance-queue"
+	QueueSignal     = "signal-queue"
 )
 
 // ---------------------------------------------------------------------------
@@ -1512,12 +1513,13 @@ func main() {
 
 	// Create worker.
 	worker := &Worker{
-		db:        dbAdapter,
-		queue:     queueAdapter,
-		docAgent:  docAgent,
-		vendAgent: vendAgent,
-		slack:     slackHITL,
-		tracer:    tracer,
+		db:          dbAdapter,
+		queue:       queueAdapter,
+		docAgent:    docAgent,
+		signalAgent: agents.NewSignalAgent(docAgent),
+		vendAgent:   vendAgent,
+		slack:       slackHITL,
+		tracer:      tracer,
 	}
 
 	deps := &ServerDeps{

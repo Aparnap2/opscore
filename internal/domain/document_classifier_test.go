@@ -62,6 +62,49 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestClassify_GoodsReceipt(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		wantType DocumentType
+	}{
+		{
+			name:     "goods receipt note",
+			text:     "GOODS RECEIPT NOTE GR No: GRN/2024/001 Receipt Note for materials received",
+			wantType: DocumentTypeGoodsReceipt,
+		},
+		{
+			name:     "grn detection",
+			text:     "GRN No: GRN/2024/001 Receipt Note for goods received into store against PO/2024/001",
+			wantType: DocumentTypeGoodsReceipt,
+		},
+		{
+			name:     "delivery challan",
+			text:     "DELIVERY CHALLAN Challan No: DC/2024/001 Receipt Note for goods delivered",
+			wantType: DocumentTypeGoodsReceipt,
+		},
+		{
+			name:     "invoice regression",
+			text:     "INVOICE Tax Invoice Bill No: INV/2024/001 Proforma for services",
+			wantType: DocumentTypeInvoice,
+		},
+		{
+			name:     "purchase order regression",
+			text:     "PURCHASE ORDER Order No: PO/2024/001 Procurement Order for Q4 2024",
+			wantType: DocumentTypePurchaseOrder,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Classify(tt.text)
+			if result.Type != tt.wantType {
+				t.Errorf("Classify(%q).Type = %v, want %v", tt.name, result.Type, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestClassify_Confidence(t *testing.T) {
 	tests := []struct {
 		name        string

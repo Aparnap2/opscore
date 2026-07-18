@@ -12,6 +12,7 @@ const (
 	DocumentTypeContract      DocumentType = "contract"
 	DocumentTypePurchaseOrder DocumentType = "purchase_order"
 	DocumentTypeGSTNotice     DocumentType = "gst_notice"
+	DocumentTypeGoodsReceipt  DocumentType = "goods_receipt"
 	DocumentTypeUnknown       DocumentType = "unknown"
 )
 
@@ -54,6 +55,15 @@ var (
 		"order no",
 		"procurement order",
 	}
+
+	goodsReceiptKeywords = []string{
+		"goods receipt",
+		"grn",
+		"delivery challan",
+		"receipt note",
+		"gr no",
+		"challan",
+	}
 )
 
 // Classify classifies a document based on its text content
@@ -70,19 +80,23 @@ func Classify(rawText string) *ClassificationResult {
 		"contract":       countKeywordMatches(text, contractKeywords),
 		"gst_notice":     countKeywordMatches(text, gstNoticeKeywords),
 		"purchase_order": countKeywordMatches(text, purchaseOrderKeywords),
+		"goods_receipt":  countKeywordMatches(text, goodsReceiptKeywords),
 	}
 
 	// Determine document type based on highest score
 	docType := DocumentTypeUnknown // default
 	confidence := 0.0
 
-	// Priority order: invoice > po > gst_notice > contract
+	// Priority order: invoice > po > goods_receipt > gst_notice > contract
 	if scores["invoice"] >= 2 {
 		docType = DocumentTypeInvoice
 		confidence = float64(scores["invoice"]) / float64(len(invoiceKeywords))
 	} else if scores["purchase_order"] >= 2 {
 		docType = DocumentTypePurchaseOrder
 		confidence = float64(scores["purchase_order"]) / float64(len(purchaseOrderKeywords))
+	} else if scores["goods_receipt"] >= 2 {
+		docType = DocumentTypeGoodsReceipt
+		confidence = float64(scores["goods_receipt"]) / float64(len(goodsReceiptKeywords))
 	} else if scores["gst_notice"] >= 2 {
 		docType = DocumentTypeGSTNotice
 		confidence = float64(scores["gst_notice"]) / float64(len(gstNoticeKeywords))

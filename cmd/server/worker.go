@@ -16,18 +16,20 @@ import (
 
 // Worker processes queued jobs.
 type Worker struct {
-	db        providers.DBProvider
-	queue     providers.QueueProvider
-	docAgent  *agents.DocumentAgent
-	vendAgent *agents.VendorAgent
-	slack     providers.HITLProvider
-	tracer    providers.TracingProvider
+	db          providers.DBProvider
+	queue       providers.QueueProvider
+	docAgent    *agents.DocumentAgent
+	signalAgent *agents.SignalAgent
+	vendAgent   *agents.VendorAgent
+	slack       providers.HITLProvider
+	tracer      providers.TracingProvider
 }
 
 // Start launches goroutines for each queue.
 func (w *Worker) Start(ctx context.Context) {
 	go w.pollQueue(ctx, QueueDocument, w.processDocumentJob)
 	go w.pollQueue(ctx, QueueVendor, w.processVendorJob)
+	go w.pollQueue(ctx, QueueSignal, w.processSignalJob)
 	// QueueCompliance can be added later
 }
 
@@ -167,6 +169,117 @@ func (w *Worker) processDocumentJob(ctx context.Context, body string) error {
 			_ = w.db.UpsertHITLRequest(ctx, hitlReq)
 		}
 	}
+
+	return nil
+}
+
+// processSignalJob handles a manufacturing signal job (PO/GRN/Invoice) through
+// the transitional Signal Agent path. It reuses the document workflow's
+// version-aware upsert and HITL routing.
+func (w *Worker) processSignalJob(ctx context.Context, body string) error {
+	var job agents.SignalJob
+	if err := json.Unmarshal([]byte(body), &job); err != nil {
+		return fmt.Errorf("unmarshal signal job: %w", err)
+	}
+
+	upsertWithVersion := func(j *domain.Job) error {
+		existingJob, getErr := w.db.GetJob(ctx, job.JobID, job.TenantID)
+		if getErr == nil {
+			j.Version = existingJob.Version
+		}
+		if err := w.db.UpsertJob(ctx, j); err != nil {
+			if errors.Is(err, postgres.ErrVersionConflict) {
+				existingJob, getErr := w.db.GetJob(ctx, job.JobID, job.TenantID)
+				if getErr == nil {
+					j.Version = existingJob.Version
+				}
+				return w.db.UpsertJob(ctx, j)
+			}
+			return err
+		}
+		return nil
+	}
+
+	dbJob := &domain.Job{
+		ID:        job.JobID,
+		TenantID:  job.TenantID,
+		Status:    domain.JobStatusProcessing,
+		UpdatedAt: time.Now(),
+	}
+	if err := upsertWithVersion(dbJob); err != nil {
+		slog.Error("Failed to update signal job to PROCESSING", "jobID", job.JobID, "err", err)
+	}
+
+	result, err := w.signalAgent.ProcessSignal(ctx, &job, nil)
+	if err != nil {
+		failedJob := &domain.Job{
+			ID:        job.JobID,
+			TenantID:  job.TenantID,
+			Status:    domain.JobStatusRetryableFailed,
+			Error:     err.Error(),
+			UpdatedAt: time.Now(),
+		}
+		_ = upsertWithVersion(failedJob)
+		_ = w.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   job.TenantID,
+			Actor:      "system",
+			Action:     "PROCESSING_FAILED",
+			TargetType: "job",
+			TargetID:   job.JobID,
+			OldState:   string(domain.JobStatusProcessing),
+			NewState:   string(domain.JobStatusRetryableFailed),
+			Error:      err.Error(),
+			Timestamp:  time.Now(),
+		})
+		return err
+	}
+
+	// Persist the deterministic signal result on the job record.
+	outJob := &domain.Job{
+		ID:           job.JobID,
+		TenantID:     job.TenantID,
+		Status:       domain.JobStatusCompleted,
+		DocumentType: result.DocumentType,
+		Confidence:   result.Confidence,
+		Extracted:    result,
+		UpdatedAt:    time.Now(),
+	}
+	if result.NeedsHITL {
+		outJob.Status = domain.JobStatusAwaitingHITL
+		outJob.HITLReason = result.HITLReason
+	}
+	if err := upsertWithVersion(outJob); err != nil {
+		slog.Error("Failed to persist signal job result", "jobID", job.JobID, "err", err)
+	}
+
+	if result.NeedsHITL {
+		reason := fmt.Sprintf("Signal %s requires approval", job.FileName)
+		if result.HITLReason != "" {
+			reason = fmt.Sprintf("%s | %s", reason, result.HITLReason)
+		}
+		hitlReq := &domain.HITLRequest{
+			ID:       fmt.Sprintf("hitl-%s", job.JobID),
+			TenantID: job.TenantID,
+			JobID:    job.JobID,
+			Reason:   reason,
+			Status:   domain.HITLStatusPending,
+			SentAt:   time.Now(),
+		}
+		if err := w.slack.SendApprovalRequest(ctx, hitlReq); err != nil {
+			slog.Error("Failed to send Slack approval for signal", "jobID", job.JobID, "err", err)
+		} else {
+			_ = w.db.UpsertHITLRequest(ctx, hitlReq)
+		}
+	}
+
+	_ = w.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+		Actor:      "system",
+		Action:     "PROCESSED",
+		TargetType: "job",
+		TargetID:   job.JobID,
+		NewState:   string(outJob.Status),
+		Timestamp:  time.Now(),
+	})
 
 	return nil
 }
