@@ -1,8 +1,8 @@
 # OpsCore
 
-Every B2B business owner starts as a craftsperson — a trader, a service expert. They built their business around what they know how to do. But at five employees, the back-office collapses. Invoice processing, vendor ID verification, GST compliance, duplicate detection — these are not skilled tasks, yet they consume skilled people. The owner does them because no one else can be trusted to do them consistently.
+OpsCore is an agentic operations control tower for MSME manufacturers. It ingests fragmented operational signals — purchase orders, goods receipts, invoices, stock sheets, and supplier documents — and detects mismatches across the PO → GRN → Invoice flow (missing GRNs, partial receipts, quantity/price/tax variances, vendor conflicts) before they become payment blocks or dispatch misses. The owner no longer has to be the human control tower.
 
-OpsCore replaces the manual back-office with a system that produces identical results every time, with no human in the loop except for the final approval decision. Classification, validation, scoring, and audit-trail logic is all compiled Go code — no LLM unless absolutely necessary.
+OpsCore replaces manual reconciliation with a system that produces identical results every time, with a human in the loop only for the final approval decision. Classification, validation, line matching, and mismatch detection are all compiled Go code — no LLM unless absolutely necessary.
 
 **Loom walkthrough:** *(coming soon)*
 
@@ -25,20 +25,40 @@ Everything else is Go.
 ## How It Works
 
 ```
-You upload a PDF invoice
-  → Go validates GST/PAN/IFSC with regex (no LLM)
-  → Deterministic risk score computed
-  → If amount > ₹1L or low confidence → Slack approval request
+You upload a PO / GRN / Invoice document
+  → Go classifies document type + validates GSTIN with regex (no LLM)
+  → Zero-I/O OCR→domain mapper normalizes into canonical entities
+  → DetectMismatch compares PO ↔ GRN ↔ Invoice deterministically
+  → If mismatch is payment-affecting / low confidence / GSTIN conflict → Slack approval
   → Owner clicks [Approve] → done
 ```
 
-**Three workflows:**
+**Workflows:**
 
-1. **Document Ingestion** — Upload a PDF invoice. Go validates tax identifiers with compiled regex, extracts structured data via Sarvam OCR, classifies document type by keyword rules, and routes high-value or low-confidence items through a Slack Block Kit approval flow.
+1. **Signal Ingestion & Mismatch Detection** — Upload a PO, GRN, or invoice document. Go classifies the document type by keyword rules, validates the vendor GSTIN with compiled regex, and normalizes the extracted payload into canonical domain entities (`PurchaseOrder`, `GoodsReceipt`, `Invoice`) via a zero-I/O OCR mapper. The `DetectMismatch` engine then compares the PO → GRN → Invoice flow deterministically and emits typed `ExceptionCase` outputs (missing GRN, partial receipt, quantity/price/tax variance, vendor mismatch). Payment-affecting mismatches, low-confidence extractions, validation errors, and GSTIN conflicts are routed through a Slack Block Kit approval flow.
 
 2. **Vendor Onboarding** — Submit vendor details (GST, PAN, IFSC). Go validates every field with regex, computes a deterministic risk score (0–100), assigns a trust tier (PROBATION → STANDARD → PREFERRED → STRATEGIC), and triggers HITL approval for risky or duplicate entries.
 
 3. **Compliance Monitoring** — A weekly timer scrapes SEBI/RBI/GST portal RSS feeds. New circulars are chunked and analyzed against tenant policy rules via Sarvam-M. Critical and high-severity gaps trigger Slack alerts. No human needed for routine monitoring.
+
+---
+
+## Status
+
+**Current checkpoint:** `pivot-phase-1.3-complete` — OpsCore has pivoted from back-office automation to an agentic operations control tower for MSME manufacturing, focused on PO/GRN/invoice mismatch detection. This checkpoint is a coherent internal boundary: deterministic domain logic plus transitional agent/worker wiring, with no schema expansion yet.
+
+What is implemented at this checkpoint:
+
+- **Deterministic domain entities** — `PurchaseOrder`, `GoodsReceipt`, `Invoice` (zero-I/O, tenant-scoped via `tenant_id`, optimistic-locked via `version`, GSTIN-validated).
+- **Mismatch engine** — `DetectMismatch` with typed `ExceptionCase` output and 6 mismatch types (`MISSING_GRN`, `PARTIAL_RECEIPT`, `QTY_VARIANCE`, `PRICE_VARIANCE`, `TAX_VARIANCE`, `VENDOR_MISMATCH`), plus tenant-scoped duplicate detection.
+- **Transitional agent/worker wiring** — GRN document classification, a zero-I/O OCR→domain mapper, a `SignalAgent` reusing the `DocumentAgent` OCR+classifier pipeline, HITL routing for low confidence / validation errors / GSTIN conflicts / payment-affecting mismatches, and a `QueueSignal` + `processSignalJob` worker path. Normalized entities currently persist in `jobs.extracted_data` as a transitional bridge.
+
+Guardrails held at this checkpoint: zero-I/O domain, deterministic-first (no LLM in validation/matching/mismatch), queue-backed orchestration, optimistic job locking, append-only audit events, Slack HITL, and tenant isolation (Postgres RLS).
+
+**Next milestones (not started):**
+
+- **Phase 1.4A — Persistence:** dedicated `purchase_orders` / `goods_receipts` / `invoices` tables with `tenant_id`, RLS, `version`, and indexes; explicit `DBProvider` methods; Postgres adapter; integration tests for RLS + optimistic locking + round-trip.
+- **Phase 1.4B — API surface:** `POST /signals/upload` mirroring the existing upload middleware chain (auth, tenant, rate-limit, usage); endpoint + E2E tests. `jobs.extracted_data` stays as a compatibility bridge until table-backed reads are green.
 
 ---
 
@@ -67,7 +87,7 @@ cmd/server/main.go          # HTTP server, worker, route registration
 internal/domain/            # Pure Go business logic (zero I/O)
 internal/providers/         # Interface definitions (OCR, LLM, DB, Storage, Queue, HITL, Tracing)
 internal/adapters/          # Implementations (Postgres, MinIO, Redis, Sarvam)
-internal/agents/            # Workflow orchestrators (document, vendor, compliance)
+internal/agents/            # Workflow orchestrators (document, signal, vendor, compliance)
 internal/telemetry/         # Langfuse tracing, metrics, no-op fallback
 internal/middleware/        # HTTP middleware
 │   ├── auth/               # API-key auth & RBAC (Owner, OpsAdmin, Reviewer)
@@ -87,6 +107,8 @@ The system follows a hexagonal (ports & adapters) architecture. Every external d
 | GST/PAN/IFSC validation | `internal/domain/india_validator.go` (compiled Go regex) |
 | Vendor risk scoring | `internal/domain/risk_scorer.go` (base 50 + adjustments) |
 | Trust tier transitions | `internal/domain/trust_battery.go` (state machine) |
+| PO/GRN/Invoice mismatch | `internal/domain/mismatch.go` (`DetectMismatch`, typed `ExceptionCase`, 6 mismatch types) |
+| OCR→domain normalization | `internal/domain/signal_mapping.go` (zero-I/O mapper) |
 
 Architecture decisions are recorded in `docs/architecture/adr/` (20 ADRs covering the full system).
 
@@ -187,6 +209,11 @@ opscore/
 │   │   ├── risk_scorer.go      # Deterministic risk score (0–100)
 │   │   ├── document_classifier.go  # Keyword classification
 │   │   ├── india_validator.go  # GST / PAN / IFSC regex validation
+│   │   ├── purchase_order.go   # PO entity (tenant-scoped, optimistic-locked, GSTIN-validated)
+│   │   ├── goods_receipt.go    # GRN entity
+│   │   ├── invoice.go          # Invoice entity
+│   │   ├── mismatch.go         # DetectMismatch engine + ExceptionCase (6 types)
+│   │   ├── signal_mapping.go   # Zero-I/O OCR→domain mapper
 │   │   ├── chunker.go          # Text chunking for compliance analysis
 │   │   ├── upload.go           # Upload validation & storage logic
 │   │   ├── batch_job.go        # Batch processing support
@@ -194,6 +221,7 @@ opscore/
 │   │
 │   ├── agents/                 # Workflow orchestrators
 │   │   ├── document_agent.go   # Document ingestion workflow
+│   │   ├── signal_agent.go     # Signal ingestion + mismatch workflow
 │   │   ├── vendor_agent.go     # Vendor onboarding workflow
 │   │   └── compliance_agent.go # Compliance monitoring workflow
 │   │
