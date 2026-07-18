@@ -227,6 +227,48 @@ func (m *mockDB) GetRecentCompliance(_ context.Context, tenantID string, limit i
 	return nil, nil // Not needed for mock tests
 }
 
+// --- Manufacturing pivot (Phase 1.4A) mock stubs ---------------------------
+
+func (m *mockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error {
+	return nil
+}
+func (m *mockDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *mockDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *mockDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error {
+	return nil
+}
+func (m *mockDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *mockDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *mockDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error {
+	return nil
+}
+func (m *mockDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *mockDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *mockDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error {
+	return nil
+}
+func (m *mockDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *mockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *mockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
 // mockStorage implements providers.StorageProvider.
 type mockStorage struct {
 	mu   sync.Mutex

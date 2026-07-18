@@ -25,6 +25,8 @@ type Invoice struct {
 	InvoiceDate time.Time     `json:"invoice_date"`
 	Lines       []InvoiceLine `json:"lines"`
 	Version     int           `json:"version"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
 // Validate checks the invoice for required fields and deterministic business rules.

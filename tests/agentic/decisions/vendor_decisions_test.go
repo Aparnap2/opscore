@@ -530,3 +530,41 @@ func TestVendorAgent_CheckDuplicate_NoMatch_ReturnsFalse(t *testing.T) {
 	}
 	t.Logf("✅ No duplicate: found=%v", dup)
 }
+
+// --- Manufacturing pivot (Phase 1.4A) mock stubs (not exercised by this test) ---
+
+func (m *vendorMockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error {
+	return nil
+}
+func (m *vendorMockDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *vendorMockDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error {
+	return nil
+}
+func (m *vendorMockDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *vendorMockDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (m *vendorMockDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *vendorMockDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error {
+	return nil
+}
+func (m *vendorMockDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *vendorMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *vendorMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

@@ -28,6 +28,7 @@ const (
 	WorkflowDocumentIngestion WorkflowType = "DOCUMENT_INGESTION"
 	WorkflowVendorOnboarding  WorkflowType = "VENDOR_ONBOARDING"
 	WorkflowCompliance        WorkflowType = "COMPLIANCE"
+	WorkflowSignalIngestion   WorkflowType = "SIGNAL_INGESTION"
 )
 
 type HITLRequestStatus string

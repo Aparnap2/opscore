@@ -531,3 +531,39 @@ func TestCompliance_CreateTicket(t *testing.T) {
 func newCompLLM() *compMockLLM {
 	return newCompMockLLM()
 }
+
+// --- Manufacturing pivot (Phase 1.4A) mock stubs (not exercised by this test) ---
+
+func (m *compMockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error {
+	return nil
+}
+func (m *compMockDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *compMockDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *compMockDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error { return nil }
+func (m *compMockDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *compMockDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *compMockDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (m *compMockDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *compMockDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *compMockDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error {
+	return nil
+}
+func (m *compMockDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *compMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *compMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

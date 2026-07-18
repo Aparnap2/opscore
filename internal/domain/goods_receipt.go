@@ -24,6 +24,8 @@ type GoodsReceipt struct {
 	ReceiptDate time.Time          `json:"receipt_date"`
 	Lines       []GoodsReceiptLine `json:"lines"`
 	Version     int                `json:"version"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 }
 
 // Validate checks the GRN for required fields and deterministic business rules.

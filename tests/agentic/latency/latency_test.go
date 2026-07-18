@@ -478,3 +478,35 @@ func TestLatency_EndToEndWorkflow(t *testing.T) {
 	}
 	t.Logf("✅ End-to-end workflow: total=%v", totalMetrics.Total)
 }
+
+// --- Manufacturing pivot (Phase 1.4A) mock stubs (not exercised by this test) ---
+
+func (m *latMockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error { return nil }
+func (m *latMockDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *latMockDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *latMockDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error { return nil }
+func (m *latMockDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *latMockDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *latMockDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (m *latMockDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *latMockDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *latMockDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error { return nil }
+func (m *latMockDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *latMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *latMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

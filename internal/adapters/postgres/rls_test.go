@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"net/url"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,13 +52,24 @@ func TestRLSFunctionWithContext(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// Set a tenant context and verify it's returned within the same implicit transaction.
-	var tenantID string
-	err = pool.QueryRow(ctx,
-		"SELECT set_config('app.tenant_id', 'test-tenant-123', TRUE); SELECT app.current_tenant_id()",
-	).Scan(&tenantID)
+	// Set a tenant context and verify it's returned. pgx v5 sends a prepared
+	// statement and rejects multi-statement Exec/Query, so we issue the SET and
+	// the SELECT as two separate statements inside ONE transaction. (set_config
+	// with the third arg TRUE only persists for the current transaction, so the
+	// two statements must share a transaction.)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
-		t.Fatalf("Failed to set and read tenant context: %v", err)
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id', 'test-tenant-123', TRUE)"); err != nil {
+		t.Fatalf("Failed to set tenant context: %v", err)
+	}
+	var tenantID string
+	err = tx.QueryRow(ctx, "SELECT app.current_tenant_id()").Scan(&tenantID)
+	if err != nil {
+		t.Fatalf("Failed to read tenant context: %v", err)
 	}
 
 	if tenantID != "test-tenant-123" {
@@ -109,8 +121,16 @@ func TestRLSPolicyExists(t *testing.T) {
 
 	for _, tt := range tables {
 		t.Run(tt.name, func(t *testing.T) {
-			// Check RLS is enabled.
-			var rlsEnabled string
+			// Tables marked allowEmpty (e.g. tenants) are intentionally exempt
+			// from RLS — they are the bootstrap table queried before any tenant
+			// context exists. Skip the RLS-enabled / policy assertions for them.
+			if tt.allowEmpty {
+				return
+			}
+
+			// Check RLS is enabled. relrowsecurity is a boolean column; scan it
+			// into a bool (pgx rejects scanning bool into *string in binary format).
+			var rlsEnabled bool
 			err := pool.QueryRow(ctx, `
 				SELECT relrowsecurity
 				FROM pg_class
@@ -119,8 +139,8 @@ func TestRLSPolicyExists(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to check RLS status for %s: %v", tt.name, err)
 			}
-			if rlsEnabled != "t" {
-				t.Errorf("RLS is not enabled on table %s (got %q)", tt.name, rlsEnabled)
+			if !rlsEnabled {
+				t.Errorf("RLS is not enabled on table %s", tt.name)
 			}
 
 			// Check the tenant_isolation policy exists.
@@ -142,6 +162,12 @@ func TestRLSPolicyExists(t *testing.T) {
 
 // TestRLSIsolation verifies that RLS actually prevents cross-tenant access
 // within a transaction where tenant context is set.
+//
+// The application connects as a superuser, which bypasses RLS even with FORCE
+// ROW LEVEL SECURITY. To genuinely exercise RLS we connect as a dedicated
+// non-superuser role (rls_iso_test) that is subject to RLS and has SELECT/INSERT
+// on the relevant tables. With app.tenant_id set, the tenant_isolation policy
+// must filter the plain SELECT to only the current tenant's rows.
 func TestRLSIsolation(t *testing.T) {
 	connStr := GetTestDatabaseURL(t)
 	if connStr == "" {
@@ -149,13 +175,117 @@ func TestRLSIsolation(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, connStr)
+	adminPool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
+	defer adminPool.Close()
+
+	// Create (idempotently) a non-superuser role subject to RLS, and grant it
+	// access to the tables we touch. The tenants table has no RLS, so the role
+	// can insert the tenant rows; jobs has RLS and must be filtered.
+	const isoRole = "rls_iso_test"
+	setupStmts := []string{
+		"DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '" + isoRole + "') THEN CREATE ROLE " + isoRole + " NOSUPERUSER NOBYPASSRLS LOGIN PASSWORD '" + isoRole + "'; END IF; END $$;",
+		"GRANT CONNECT ON DATABASE opscore TO " + isoRole,
+		"GRANT USAGE ON SCHEMA public TO " + isoRole,
+		"GRANT SELECT, INSERT ON tenants, jobs TO " + isoRole,
+	}
+	for _, s := range setupStmts {
+		if _, err := adminPool.Exec(ctx, s); err != nil {
+			t.Fatalf("Failed to set up RLS isolation role: %v", err)
+		}
+	}
+
+	// Build a pool as the non-superuser RLS role.
+	u, err := url.Parse(connStr)
+	if err != nil {
+		t.Fatalf("Failed to parse connStr: %v", err)
+	}
+	u.User = url.UserPassword(isoRole, isoRole)
+	pool, err := pgxpool.New(ctx, u.String())
+	if err != nil {
+		t.Fatalf("Failed to connect as RLS isolation role: %v", err)
+	}
 	defer pool.Close()
 
-	// Use a transaction to test RLS isolation within a single transaction.
+	// Seed the data. The jobs RLS policy (tenant_id = app.current_tenant_id())
+	// applies to INSERT as well as SELECT, so each job must be inserted inside
+	// a transaction whose tenant context matches the row's tenant_id. We insert
+	// the two tenant rows (tenants has no RLS) in one transaction, then each
+	// job in its own context-matched transaction.
+	seedTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Failed to begin seed transaction: %v", err)
+	}
+	defer seedTx.Rollback(ctx)
+
+	_, err = seedTx.Exec(ctx, `
+		INSERT INTO tenants (id, name, slug, plan, status)
+		VALUES ('rls-test-tenant', 'RLS Test', 'rls-test', 'starter', 'active')
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert test tenant: %v", err)
+	}
+
+	_, err = seedTx.Exec(ctx, `
+		INSERT INTO tenants (id, name, slug, plan, status)
+		VALUES ('rls-other-tenant', 'RLS Other', 'rls-other', 'starter', 'active')
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert other tenant: %v", err)
+	}
+
+	if err := seedTx.Commit(ctx); err != nil {
+		t.Fatalf("Failed to commit seed transaction: %v", err)
+	}
+
+	// Insert the current-tenant job with the matching tenant context.
+	jobTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Failed to begin job transaction: %v", err)
+	}
+	defer jobTx.Rollback(ctx)
+	if _, err = jobTx.Exec(ctx, "SELECT set_config('app.tenant_id', 'rls-test-tenant', TRUE)"); err != nil {
+		t.Fatalf("Failed to set tenant context for current job: %v", err)
+	}
+	_, err = jobTx.Exec(ctx, `
+		INSERT INTO jobs (id, tenant_id, workflow_type, status)
+		VALUES ('rls-job-1', 'rls-test-tenant', 'test', 'pending')
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert job for current tenant: %v", err)
+	}
+	if err := jobTx.Commit(ctx); err != nil {
+		t.Fatalf("Failed to commit current job: %v", err)
+	}
+
+	// Insert the other-tenant job with its own matching tenant context.
+	otherTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Failed to begin other job transaction: %v", err)
+	}
+	defer otherTx.Rollback(ctx)
+	if _, err = otherTx.Exec(ctx, "SELECT set_config('app.tenant_id', 'rls-other-tenant', TRUE)"); err != nil {
+		t.Fatalf("Failed to set tenant context for other job: %v", err)
+	}
+	_, err = otherTx.Exec(ctx, `
+		INSERT INTO jobs (id, tenant_id, workflow_type, status)
+		VALUES ('rls-job-2', 'rls-other-tenant', 'test', 'pending')
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert job for other tenant: %v", err)
+	}
+	if err := otherTx.Commit(ctx); err != nil {
+		t.Fatalf("Failed to commit other job: %v", err)
+	}
+
+	// Now open a transaction WITH the current tenant context and verify RLS
+	// filters the plain SELECT to only the current tenant's jobs.
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("Failed to begin transaction: %v", err)
@@ -166,45 +296,6 @@ func TestRLSIsolation(t *testing.T) {
 	_, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id', 'rls-test-tenant', TRUE)")
 	if err != nil {
 		t.Fatalf("Failed to set tenant context: %v", err)
-	}
-
-	// Insert test data for two different tenants.
-	_, err = tx.Exec(ctx, `
-		INSERT INTO tenants (id, name, slug, plan, status)
-		VALUES ('rls-test-tenant', 'RLS Test', 'rls-test', 'starter', 'active')
-		ON CONFLICT (id) DO NOTHING
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert test tenant: %v", err)
-	}
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO tenants (id, name, slug, plan, status)
-		VALUES ('rls-other-tenant', 'RLS Other', 'rls-other', 'starter', 'active')
-		ON CONFLICT (id) DO NOTHING
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert other tenant: %v", err)
-	}
-
-	// Insert a job for the current tenant.
-	_, err = tx.Exec(ctx, `
-		INSERT INTO jobs (id, tenant_id, workflow_type, status)
-		VALUES ('rls-job-1', 'rls-test-tenant', 'test', 'pending')
-		ON CONFLICT (id) DO NOTHING
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert job for current tenant: %v", err)
-	}
-
-	// Insert a job for a different tenant.
-	_, err = tx.Exec(ctx, `
-		INSERT INTO jobs (id, tenant_id, workflow_type, status)
-		VALUES ('rls-job-2', 'rls-other-tenant', 'test', 'pending')
-		ON CONFLICT (id) DO NOTHING
-	`)
-	if err != nil {
-		t.Fatalf("Failed to insert job for other tenant: %v", err)
 	}
 
 	// Query jobs — RLS should filter to only the current tenant's jobs.

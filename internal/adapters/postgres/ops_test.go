@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -76,9 +77,14 @@ func TestOpsEndpointsIntegration(t *testing.T) {
 	}
 }
 
-// GetTestDatabaseURL returns the database connection string from env or default
+// GetTestDatabaseURL returns the database connection string from the
+// DATABASE_URL environment variable. Integration tests are gated on this:
+// they run only when DATABASE_URL is set, and skip otherwise.
 func GetTestDatabaseURL(t *testing.T) string {
 	t.Helper()
-	// For now, skip if no DB available
-	return ""
+	url := os.Getenv("DATABASE_URL")
+	if url == "" {
+		t.Skip("Skipping integration test: DATABASE_URL is not set")
+	}
+	return url
 }

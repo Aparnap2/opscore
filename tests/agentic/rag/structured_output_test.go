@@ -590,3 +590,35 @@ func TestStructuredOutput_VendorIDFormats(t *testing.T) {
 	})
 	t.Log("✅ All vendor ID format validations correct")
 }
+
+// --- Manufacturing pivot (Phase 1.4A) mock stubs (not exercised by this test) ---
+
+func (m *soMockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error { return nil }
+func (m *soMockDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *soMockDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *soMockDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error { return nil }
+func (m *soMockDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *soMockDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *soMockDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (m *soMockDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *soMockDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *soMockDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error { return nil }
+func (m *soMockDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *soMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *soMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

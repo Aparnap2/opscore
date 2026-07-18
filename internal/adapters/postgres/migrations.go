@@ -242,8 +242,203 @@ CREATE POLICY tenant_isolation ON usage_records
 -- before any tenant context is set.)
 
 -- Performance indexes for multi-tenant queries
-CREATE INDEX IF NOT EXISTS idx_jobs_tenant_created ON jobs(tenant_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_jobs_tenant_created ON jobs(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_vendors_trust_tier ON vendors(tenant_id, (trust_battery->>'tier'));
+`,
+	},
+	{
+		// DESIGN (Phase 1.4A manufacturing pivot): creates the tenant-scoped
+		// manufacturing entity tables (purchase_orders, goods_receipts, invoices,
+		// exception_cases) plus their line-item tables. Every table carries
+		// tenant_id + RLS, and every mutable entity carries a version column for
+		// optimistic locking. No LLM/AI columns are introduced.
+		//
+		// NOTE: The adapter implementation (postgres adapter) for these tables is
+		// owned by the backend agent. This migration is copy-paste ready and
+		// self-contained.
+		version: 6,
+		name:    "manufacturing_entities",
+		sql: `
+-- ===========================================================================
+-- PURCHASE ORDERS
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS purchase_orders (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	document_no TEXT NOT NULL,
+	vendor_gstin TEXT NOT NULL,
+	order_date TIMESTAMPTZ NOT NULL,
+	version INT NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	updated_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id)
+);
+CREATE TABLE IF NOT EXISTS purchase_order_lines (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	po_id TEXT NOT NULL,
+	line_ref TEXT NOT NULL,
+	item_code TEXT NOT NULL,
+	item_desc TEXT,
+	uom TEXT,
+	quantity DOUBLE PRECISION NOT NULL,
+	unit_rate DOUBLE PRECISION NOT NULL,
+	tax_rate_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id),
+	FOREIGN KEY (tenant_id, po_id) REFERENCES purchase_orders (tenant_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_tenant_docno ON purchase_orders(tenant_id, document_no);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_tenant_vendor ON purchase_orders(tenant_id, vendor_gstin);
+CREATE INDEX IF NOT EXISTS idx_po_lines_tenant_po ON purchase_order_lines(tenant_id, po_id);
+CREATE INDEX IF NOT EXISTS idx_po_lines_tenant_poref ON purchase_order_lines(tenant_id, po_id, line_ref);
+
+-- ===========================================================================
+-- GOODS RECEIPTS (GRN)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS goods_receipts (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	document_no TEXT NOT NULL,
+	vendor_gstin TEXT NOT NULL,
+	po_number TEXT NOT NULL,
+	receipt_date TIMESTAMPTZ NOT NULL,
+	version INT NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	updated_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id)
+);
+CREATE TABLE IF NOT EXISTS goods_receipt_lines (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	grn_id TEXT NOT NULL,
+	line_ref TEXT NOT NULL,
+	po_line_ref TEXT NOT NULL,
+	item_code TEXT NOT NULL,
+	received_qty DOUBLE PRECISION NOT NULL,
+	uom TEXT,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id),
+	FOREIGN KEY (tenant_id, grn_id) REFERENCES goods_receipts (tenant_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_goods_receipts_tenant_docno ON goods_receipts(tenant_id, document_no);
+CREATE INDEX IF NOT EXISTS idx_goods_receipts_tenant_pono ON goods_receipts(tenant_id, po_number);
+CREATE INDEX IF NOT EXISTS idx_gr_lines_tenant_grn ON goods_receipt_lines(tenant_id, grn_id);
+CREATE INDEX IF NOT EXISTS idx_gr_lines_tenant_poref ON goods_receipt_lines(tenant_id, grn_id, po_line_ref);
+
+-- ===========================================================================
+-- INVOICES
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS invoices (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	document_no TEXT NOT NULL,
+	vendor_gstin TEXT NOT NULL,
+	po_number TEXT,
+	invoice_date TIMESTAMPTZ NOT NULL,
+	version INT NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	updated_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id)
+);
+CREATE TABLE IF NOT EXISTS invoice_lines (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	invoice_id TEXT NOT NULL,
+	line_ref TEXT NOT NULL,
+	po_line_ref TEXT,
+	item_code TEXT NOT NULL,
+	quantity DOUBLE PRECISION NOT NULL,
+	unit_rate DOUBLE PRECISION NOT NULL,
+	tax_rate_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id),
+	FOREIGN KEY (tenant_id, invoice_id) REFERENCES invoices (tenant_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_invoices_tenant_docno ON invoices(tenant_id, document_no);
+CREATE INDEX IF NOT EXISTS idx_invoices_tenant_pono ON invoices(tenant_id, po_number);
+CREATE INDEX IF NOT EXISTS idx_inv_lines_tenant_invoice ON invoice_lines(tenant_id, invoice_id);
+CREATE INDEX IF NOT EXISTS idx_inv_lines_tenant_poref ON invoice_lines(tenant_id, invoice_id, po_line_ref);
+
+-- ===========================================================================
+-- EXCEPTION CASES (mismatch records from DetectMismatch)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS exception_cases (
+	id TEXT NOT NULL,
+	tenant_id TEXT NOT NULL,
+	type TEXT NOT NULL,
+	severity TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'OPEN',
+	vendor_gstin TEXT NOT NULL,
+	po_id TEXT,
+	po_line_ref TEXT,
+	grn_id TEXT,
+	grn_line_ref TEXT,
+	invoice_id TEXT,
+	invoice_line_ref TEXT,
+	description TEXT NOT NULL,
+	detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	updated_at TIMESTAMPTZ DEFAULT NOW(),
+	PRIMARY KEY (tenant_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_exception_cases_tenant_status ON exception_cases(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_exception_cases_tenant_type ON exception_cases(tenant_id, type);
+CREATE INDEX IF NOT EXISTS idx_exception_cases_tenant_po ON exception_cases(tenant_id, po_id);
+CREATE INDEX IF NOT EXISTS idx_exception_cases_tenant_grn ON exception_cases(tenant_id, grn_id);
+CREATE INDEX IF NOT EXISTS idx_exception_cases_tenant_invoice ON exception_cases(tenant_id, invoice_id);
+
+-- ===========================================================================
+-- ROW LEVEL SECURITY (mirrors version 5 tenant_isolation pattern)
+-- ===========================================================================
+ALTER TABLE purchase_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_orders FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON purchase_orders;
+CREATE POLICY tenant_isolation ON purchase_orders
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
+
+ALTER TABLE purchase_order_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_order_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON purchase_order_lines;
+CREATE POLICY tenant_isolation ON purchase_order_lines
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
+
+ALTER TABLE goods_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE goods_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON goods_receipts;
+CREATE POLICY tenant_isolation ON goods_receipts
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
+
+ALTER TABLE goods_receipt_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE goods_receipt_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON goods_receipt_lines;
+CREATE POLICY tenant_isolation ON goods_receipt_lines
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
+
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON invoices;
+CREATE POLICY tenant_isolation ON invoices
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
+
+ALTER TABLE invoice_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON invoice_lines;
+CREATE POLICY tenant_isolation ON invoice_lines
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
+
+ALTER TABLE exception_cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE exception_cases FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON exception_cases;
+CREATE POLICY tenant_isolation ON exception_cases
+	USING (tenant_id = app.current_tenant_id())
+	WITH CHECK (tenant_id = app.current_tenant_id());
 `,
 	},
 }

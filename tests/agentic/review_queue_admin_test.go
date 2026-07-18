@@ -716,3 +716,39 @@ func mustMarshalJSON(v any) string {
 	}
 	return string(b)
 }
+
+// --- Manufacturing pivot (Phase 1.4A) in-memory stubs (not exercised by these tests) ---
+
+func (d *InMemoryDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error {
+	return nil
+}
+func (d *InMemoryDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *InMemoryDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (d *InMemoryDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error { return nil }
+func (d *InMemoryDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *InMemoryDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (d *InMemoryDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (d *InMemoryDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *InMemoryDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (d *InMemoryDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error {
+	return nil
+}
+func (d *InMemoryDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *InMemoryDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (d *InMemoryDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

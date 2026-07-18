@@ -234,7 +234,27 @@ func (w *Worker) processSignalJob(ctx context.Context, body string) error {
 		return err
 	}
 
-	// Persist the deterministic signal result on the job record.
+	// Converge the signal workflow onto first-class manufacturing tables
+	// (Phase 2): persist the mapped entity + any exception cases via DBProvider.
+	// The job record below remains the traceability summary (PHASE 7 retires the
+	// extracted_data bridge as the primary store).
+	if err := agents.PersistSignalResult(ctx, w.db, &job, result); err != nil {
+		slog.Error("Failed to persist manufacturing entities for signal", "jobID", job.JobID, "err", err)
+		_ = w.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   job.TenantID,
+			Actor:      "system",
+			Action:     "MANUFACTURING_PERSIST_FAILED",
+			TargetType: "job",
+			TargetID:   job.JobID,
+			NewState:   string(domain.JobStatusRetryableFailed),
+			Error:      err.Error(),
+			Timestamp:  time.Now(),
+		})
+		return err
+	}
+
+	// Persist the deterministic signal result on the job record (traceability
+	// summary — retained through PHASE 7 which retires the extracted_data bridge).
 	outJob := &domain.Job{
 		ID:           job.JobID,
 		TenantID:     job.TenantID,

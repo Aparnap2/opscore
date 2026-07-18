@@ -33,6 +33,7 @@ type mockHandlerDB struct {
 	vendors      map[string]*domain.Vendor
 	documents    map[string]*domain.Document
 	hitlRequests map[string]*domain.HITLRequest
+	exceptions   map[string]*domain.ExceptionCase
 	auditEvents  []*domain.AuditEvent
 	pingErr      error
 }
@@ -43,6 +44,7 @@ func newMockHandlerDB() *mockHandlerDB {
 		vendors:      make(map[string]*domain.Vendor),
 		documents:    make(map[string]*domain.Document),
 		hitlRequests: make(map[string]*domain.HITLRequest),
+		exceptions:   make(map[string]*domain.ExceptionCase),
 	}
 }
 
@@ -193,6 +195,61 @@ func (m *mockHandlerDB) ListHITLRequests(_ context.Context, tenantID, status str
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+func (m *mockHandlerDB) UpsertExceptionCase(_ context.Context, ec *domain.ExceptionCase) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.exceptions[ec.ID] = ec
+	return nil
+}
+
+func (m *mockHandlerDB) GetExceptionCaseByID(_ context.Context, id, tenantID string) (*domain.ExceptionCase, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ec, ok := m.exceptions[id]
+	if !ok || ec.TenantID != tenantID {
+		return nil, fmt.Errorf("exception case not found")
+	}
+	return ec, nil
+}
+
+func (m *mockHandlerDB) ListExceptionCases(_ context.Context, tenantID, status, mismatchType string, limit, offset int) ([]*domain.ExceptionCase, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*domain.ExceptionCase
+	for _, ec := range m.exceptions {
+		if ec.TenantID != tenantID {
+			continue
+		}
+		if status != "" && ec.Status != status {
+			continue
+		}
+		if mismatchType != "" && string(ec.Type) != mismatchType {
+			continue
+		}
+		result = append(result, ec)
+	}
+	if offset >= len(result) {
+		return []*domain.ExceptionCase{}, nil
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (m *mockHandlerDB) UpdateExceptionCaseStatus(_ context.Context, id, tenantID, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ec, ok := m.exceptions[id]
+	if !ok || ec.TenantID != tenantID {
+		return fmt.Errorf("exception case not found")
+	}
+	ec.Status = status
+	ec.UpdatedAt = time.Now()
+	return nil
 }
 
 func (m *mockHandlerDB) AppendAuditEvent(_ context.Context, event *domain.AuditEvent) error {

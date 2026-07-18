@@ -188,6 +188,30 @@ func (d *inMemoryDB) ListPendingHITL(_ context.Context, tenantID string) ([]*dom
 	return result, nil
 }
 
+// ListHITLRequests lists HITL requests for a tenant with optional status
+// filtering and pagination, enforcing tenant isolation.
+func (d *inMemoryDB) ListHITLRequests(_ context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	var result []*domain.HITLRequest
+	for _, req := range d.hitlReqs {
+		if req.TenantID != tenantID {
+			continue
+		}
+		if status != "" && req.Status != domain.HITLRequestStatus(status) {
+			continue
+		}
+		result = append(result, req)
+	}
+	if offset > 0 && len(result) > offset {
+		result = result[offset:]
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 // -- Audit Events ----------------------------------------------------------
 
 func (d *inMemoryDB) AppendAuditEvent(_ context.Context, event *domain.AuditEvent) error {
@@ -402,9 +426,9 @@ func TestCrossTenant_VendorIsolation(t *testing.T) {
 	t.Run("create 2 vendors for tenant A", func(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			vendor := &domain.Vendor{
-				ID:       fmt.Sprintf("vendor-a-%d", i),
-				TenantID: tenantA,
-				Name:     fmt.Sprintf("Vendor A-%d", i),
+				ID:        fmt.Sprintf("vendor-a-%d", i),
+				TenantID:  tenantA,
+				Name:      fmt.Sprintf("Vendor A-%d", i),
 				RiskScore: 50,
 				RiskTier:  domain.RiskTierLow,
 			}
@@ -472,10 +496,10 @@ func TestCrossTenant_VendorIsolation(t *testing.T) {
 	t.Run("GetRiskyVendors for tenant B returns only B's risky vendors", func(t *testing.T) {
 		// Add a risky vendor for tenant B.
 		riskyB := &domain.Vendor{
-			ID:          "vendor-b-risky",
-			TenantID:    tenantB,
-			Name:        "Risky B",
-			RiskScore:   20,
+			ID:           "vendor-b-risky",
+			TenantID:     tenantB,
+			Name:         "Risky B",
+			RiskScore:    20,
 			TrustBattery: domain.TrustBattery{Tier: domain.TrustTierProbation},
 		}
 		assertNoError(t, db.UpsertVendor(ctx, riskyB), "UpsertVendor for risky B vendor")
@@ -815,12 +839,12 @@ func TestCrossTenant_ComplianceIsolation(t *testing.T) {
 		now := time.Now()
 		for i := 0; i < 2; i++ {
 			rec := &domain.ComplianceRecord{
-				ID:       fmt.Sprintf("comp-a-%d", i),
-				TenantID: tenantA,
+				ID:        fmt.Sprintf("comp-a-%d", i),
+				TenantID:  tenantA,
 				SourceURL: fmt.Sprintf("https://example.com/gap-%d", i),
-				Gap:      fmt.Sprintf("Gap description %d", i),
-				Severity: "medium",
-				Score:    0.75,
+				Gap:       fmt.Sprintf("Gap description %d", i),
+				Severity:  "medium",
+				Score:     0.75,
 				CreatedAt: now.Add(-time.Duration(i) * time.Hour),
 			}
 			db.compliance = append(db.compliance, rec)
@@ -855,12 +879,12 @@ func TestCrossTenant_ComplianceIsolation(t *testing.T) {
 		// Add compliance records for B.
 		for i := 0; i < 2; i++ {
 			rec := &domain.ComplianceRecord{
-				ID:       fmt.Sprintf("comp-b-%d", i),
-				TenantID: tenantB,
+				ID:        fmt.Sprintf("comp-b-%d", i),
+				TenantID:  tenantB,
 				SourceURL: fmt.Sprintf("https://example.com/b-gap-%d", i),
-				Gap:      fmt.Sprintf("B gap %d", i),
-				Severity: "high",
-				Score:    0.5,
+				Gap:       fmt.Sprintf("B gap %d", i),
+				Severity:  "high",
+				Score:     0.5,
 				CreatedAt: time.Now(),
 			}
 			db.compliance = append(db.compliance, rec)
@@ -903,18 +927,18 @@ func TestCrossTenant_MixedDataIsolation(t *testing.T) {
 
 	// Expected counts per tenant.
 	const (
-		expectedJobsA       = 2
-		expectedJobsB       = 3
-		expectedVendorsA    = 2
-		expectedVendorsB    = 1
-		expectedDocsA       = 2
-		expectedDocsB       = 2
+		expectedJobsA        = 2
+		expectedJobsB        = 3
+		expectedVendorsA     = 2
+		expectedVendorsB     = 1
+		expectedDocsA        = 2
+		expectedDocsB        = 2
 		expectedPendingHitlA = 1
 		expectedPendingHitlB = 2
-		expectedAuditA      = 2
-		expectedAuditB      = 3
-		expectedComplianceA = 2
-		expectedComplianceB = 1
+		expectedAuditA       = 2
+		expectedAuditB       = 3
+		expectedComplianceA  = 2
+		expectedComplianceB  = 1
 	)
 
 	t.Run("seed data for both tenants", func(t *testing.T) {
@@ -1399,3 +1423,39 @@ func TestCrossTenant_EmptyTenant(t *testing.T) {
 		}
 	})
 }
+
+// --- Manufacturing pivot (Phase 1.4A) in-memory stubs (not exercised by these tests) ---
+
+func (d *inMemoryDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error {
+	return nil
+}
+func (d *inMemoryDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *inMemoryDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (d *inMemoryDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error { return nil }
+func (d *inMemoryDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *inMemoryDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (d *inMemoryDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (d *inMemoryDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *inMemoryDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (d *inMemoryDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error {
+	return nil
+}
+func (d *inMemoryDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (d *inMemoryDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (d *inMemoryDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

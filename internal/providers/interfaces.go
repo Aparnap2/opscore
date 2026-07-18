@@ -83,6 +83,33 @@ type DBProvider interface {
 	ListPendingHITL(ctx context.Context, tenantID string) ([]*domain.HITLRequest, error)
 	ListHITLRequests(ctx context.Context, tenantID, status string, limit, offset int) ([]*domain.HITLRequest, error)
 
+	// --- Manufacturing pivot (Phase 1.4A) -------------------------------------
+	// All methods are tenant-scoped. Upsert performs optimistic-locking-aware
+	// writes using the entity's Version field. Get* requires the tenant_id for
+	// RLS correctness. List* methods take explicit, non-generic filter params
+	// and simple limit/offset pagination.
+
+	// Purchase Orders
+	UpsertPurchaseOrder(ctx context.Context, po *domain.PurchaseOrder) error
+	GetPurchaseOrderByID(ctx context.Context, id, tenantID string) (*domain.PurchaseOrder, error)
+	ListPurchaseOrders(ctx context.Context, tenantID string, limit, offset int) ([]*domain.PurchaseOrder, error)
+
+	// Goods Receipts (GRN)
+	UpsertGoodsReceipt(ctx context.Context, gr *domain.GoodsReceipt) error
+	GetGoodsReceiptByID(ctx context.Context, id, tenantID string) (*domain.GoodsReceipt, error)
+	ListGoodsReceipts(ctx context.Context, tenantID, poNumber string, limit, offset int) ([]*domain.GoodsReceipt, error)
+
+	// Invoices
+	UpsertInvoice(ctx context.Context, inv *domain.Invoice) error
+	GetInvoiceByID(ctx context.Context, id, tenantID string) (*domain.Invoice, error)
+	ListInvoices(ctx context.Context, tenantID, poNumber string, limit, offset int) ([]*domain.Invoice, error)
+
+	// Exception Cases (mismatch records)
+	UpsertExceptionCase(ctx context.Context, ec *domain.ExceptionCase) error
+	GetExceptionCaseByID(ctx context.Context, id, tenantID string) (*domain.ExceptionCase, error)
+	ListExceptionCases(ctx context.Context, tenantID, status, mismatchType string, limit, offset int) ([]*domain.ExceptionCase, error)
+	UpdateExceptionCaseStatus(ctx context.Context, id, tenantID, status string) error
+
 	AppendAuditEvent(ctx context.Context, event *domain.AuditEvent) error
 	ListAuditEvents(ctx context.Context, tenantID, targetType, targetID string, limit int) ([]*domain.AuditEvent, error)
 

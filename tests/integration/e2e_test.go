@@ -15,7 +15,7 @@ import (
 func TestFullPipelineE2E(t *testing.T) {
 	baseURL := os.Getenv("E2E_BASE_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+		t.Skip("E2E_BASE_URL not set; skipping e2e")
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 

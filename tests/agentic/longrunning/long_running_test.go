@@ -605,3 +605,35 @@ func TestWorkflow_ConcurrentDuplicateSupplier_NoRaceCondition(t *testing.T) {
 	}
 	t.Logf("✅ Concurrent supplier: HITL requests=%d (expected 1)", hitlCount)
 }
+
+// --- Manufacturing pivot (Phase 1.4A) mock stubs (not exercised by this test) ---
+
+func (m *lrMockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error { return nil }
+func (m *lrMockDB) GetPurchaseOrderByID(_ context.Context, _, _ string) (*domain.PurchaseOrder, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *lrMockDB) ListPurchaseOrders(_ context.Context, _ string, _, _ int) ([]*domain.PurchaseOrder, error) {
+	return nil, nil
+}
+func (m *lrMockDB) UpsertGoodsReceipt(_ context.Context, _ *domain.GoodsReceipt) error { return nil }
+func (m *lrMockDB) GetGoodsReceiptByID(_ context.Context, _, _ string) (*domain.GoodsReceipt, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *lrMockDB) ListGoodsReceipts(_ context.Context, _, _ string, _, _ int) ([]*domain.GoodsReceipt, error) {
+	return nil, nil
+}
+func (m *lrMockDB) UpsertInvoice(_ context.Context, _ *domain.Invoice) error { return nil }
+func (m *lrMockDB) GetInvoiceByID(_ context.Context, _, _ string) (*domain.Invoice, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *lrMockDB) ListInvoices(_ context.Context, _, _ string, _, _ int) ([]*domain.Invoice, error) {
+	return nil, nil
+}
+func (m *lrMockDB) UpsertExceptionCase(_ context.Context, _ *domain.ExceptionCase) error { return nil }
+func (m *lrMockDB) GetExceptionCaseByID(_ context.Context, _, _ string) (*domain.ExceptionCase, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *lrMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ int) ([]*domain.ExceptionCase, error) {
+	return nil, nil
+}
+func (m *lrMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }

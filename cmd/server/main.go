@@ -376,6 +376,200 @@ func (s *ServerDeps) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// signalsUploadHandler handles POST /signals/upload.
+//
+// It mirrors uploadHandler but targets the manufacturing signal ingestion
+// pipeline: it uploads the blob to the documents container, creates a
+// domain.Job (WorkflowSignalIngestion), records a domain.Document, and
+// enqueues an agents.SignalJob to QueueSignal so the worker's
+// processSignalJob picks it up and persists the manufacturing data.
+//
+// Handlers stay thin: no business logic beyond file I/O, job creation, and
+// enqueue. The actual persistence happens in the worker (PHASE 2).
+func (s *ServerDeps) signalsUploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	contentType := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "multipart/form-data") {
+		writeError(w, http.StatusBadRequest, "Content-Type must be multipart/form-data")
+		return
+	}
+
+	t := tenant.FromContext(r.Context())
+	tenantID := t.ID
+
+	maxMemory := int64(10 << 20)
+	if err := r.ParseMultipartForm(maxMemory); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse form: %v", err))
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "No file provided in 'file' field")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	allowedExts := map[string]bool{".pdf": true, ".jpg": true, ".jpeg": true, ".png": true}
+	if !allowedExts[ext] {
+		writeError(w, http.StatusBadRequest, "Invalid file type. Allowed: PDF, JPG, PNG")
+		return
+	}
+
+	// Compute SHA256 hash.
+	contentHash, err := domain.ComputeSHA256Streaming(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to compute file hash")
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read file")
+		return
+	}
+	fileContent, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read file")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Check for duplicate (tenant-scoped).
+	existingDoc, err := s.db.FindBySHA256(ctx, tenantID, contentHash)
+	if err == nil && existingDoc != nil {
+		writeJSON(w, http.StatusConflict, UploadResponse{
+			JobID:   existingDoc.JobID,
+			Status:  "duplicate",
+			Message: "Document with identical content already exists",
+		})
+		return
+	}
+
+	jobID := uuid.New().String()
+	now := time.Now()
+	blobPath := fmt.Sprintf("%s/%d/%s%s", tenantID, now.Unix(), jobID, ext)
+
+	contentTypeMap := map[string]string{
+		".pdf":  "application/pdf",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+	}
+	ct := contentTypeMap[ext]
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+
+	blobURL, err := s.storage.Upload(ctx, ContainerDocuments, blobPath, bytes.NewReader(fileContent), ct)
+	if err != nil {
+		slog.Error("Signal blob upload failed", "err", err)
+		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   tenantID,
+			Actor:      "system",
+			Action:     "SIGNAL_UPLOAD_FAILED",
+			TargetType: "job",
+			TargetID:   jobID,
+			NewState:   "FAILED",
+			Error:      err.Error(),
+			Timestamp:  now,
+		})
+		writeError(w, http.StatusInternalServerError, "Failed to upload file")
+		return
+	}
+
+	idempotencyKey := domain.GenerateIdempotencyKey(contentHash, tenantID)
+
+	job := &domain.Job{
+		ID:            jobID,
+		TenantID:      tenantID,
+		WorkflowType:  domain.WorkflowSignalIngestion,
+		Status:        domain.JobStatusPending,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		TraceID:       r.Header.Get("X-Trace-ID"),
+		CorrelationID: r.Header.Get("X-Correlation-ID"),
+		Input: map[string]string{
+			"filename":        header.Filename,
+			"blob_url":        blobURL,
+			"content_hash":    contentHash,
+			"idempotency_key": idempotencyKey,
+		},
+	}
+
+	if err := s.db.UpsertJob(ctx, job); err != nil {
+		slog.Error("Failed to create signal job", "err", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create job")
+		return
+	}
+
+	doc := &domain.Document{
+		ID:          uuid.New().String(),
+		TenantID:    tenantID,
+		JobID:       jobID,
+		FileName:    header.Filename,
+		StoragePath: blobURL,
+		Type:        "SIGNAL",
+		Status:      "pending",
+		ContentHash: contentHash,
+		CreatedAt:   now,
+	}
+	if err := s.db.UpsertDocument(ctx, doc); err != nil {
+		slog.Error("Failed to create signal document record", "err", err)
+	}
+
+	signalJob := &agents.SignalJob{
+		TenantID: tenantID,
+		JobID:    jobID,
+		BlobURL:  blobURL,
+		FileName: header.Filename,
+		Type:     "SIGNAL",
+		JobType:  "ocr",
+	}
+
+	if _, err := s.rq.Enqueue(ctx, QueueSignal, signalJob); err != nil {
+		slog.Error("Failed to enqueue signal job", "err", err)
+		_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+			TenantID:   tenantID,
+			Actor:      "system",
+			Action:     "SIGNAL_ENQUEUE_FAILED",
+			TargetType: "job",
+			TargetID:   jobID,
+			NewState:   "FAILED",
+			Error:      "Failed to enqueue for processing",
+			Timestamp:  now,
+		})
+		job.Status = domain.JobStatusFailed
+		job.Error = "Failed to enqueue for processing"
+		_ = s.db.UpsertJob(ctx, job)
+		writeError(w, http.StatusInternalServerError, "Failed to queue processing job")
+		return
+	}
+
+	_ = s.db.AppendAuditEvent(ctx, &domain.AuditEvent{
+		Actor:         "system",
+		Action:        "SIGNAL_UPLOAD",
+		TargetType:    "job",
+		TargetID:      jobID,
+		NewState:      "PENDING",
+		Timestamp:     now,
+		TraceID:       job.TraceID,
+		CorrelationID: job.CorrelationID,
+	})
+
+	slog.Info("Signal upload successful", "job", jobID, "blob", blobPath)
+	writeJSON(w, http.StatusAccepted, UploadResponse{
+		JobID:   jobID,
+		Status:  "queued",
+		BlobURL: blobURL,
+		Message: "Signal uploaded successfully and queued for processing",
+	})
+}
+
 // jobStatusHandler handles GET /jobs/{id}.
 func (s *ServerDeps) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -1030,6 +1224,248 @@ func (s *ServerDeps) reviewQueueByIDHandler(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// resolveExceptionHandler handles POST /exceptions/{id}/resolve.
+//
+// It transitions an ExceptionCase to a target lifecycle status (RESOLVED,
+// ACKNOWLEDGED, or DISMISSED), enforcing tenant isolation via
+// GetExceptionCaseByID and recording an audit event on every successful
+// transition. Deterministic — no LLM involvement.
+func (s *ServerDeps) resolveExceptionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	t := tenant.FromContext(r.Context())
+	tenantID := t.ID
+
+	// Extract ID from path: /exceptions/{id}/resolve
+	id := strings.TrimPrefix(r.URL.Path, "/exceptions/")
+	id = strings.TrimSuffix(id, "/resolve")
+	id = strings.TrimRight(id, "/")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "Missing exception case ID")
+		return
+	}
+
+	// Decode request body.
+	var reqBody struct {
+		Status string `json:"status"`
+		Note   string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate the target status against the allowed lifecycle constants.
+	switch reqBody.Status {
+	case domain.ExceptionStatusResolved, domain.ExceptionStatusAck, domain.ExceptionStatusDismissed:
+		// allowed
+	default:
+		writeError(w, http.StatusBadRequest, "status must be one of RESOLVED, ACKNOWLEDGED, DISMISSED")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Fetch the current case (tenant-scoped; returns ErrNotFound for other
+	// tenants, giving us 404 + tenant isolation for free).
+	current, err := s.db.GetExceptionCaseByID(ctx, id, tenantID)
+	if err != nil {
+		slog.Error("Failed to get exception case", "id", id, "err", err)
+		writeError(w, http.StatusNotFound, "Exception case not found")
+		return
+	}
+	oldStatus := current.Status
+
+	// Apply the status transition.
+	if err := s.db.UpdateExceptionCaseStatus(ctx, id, tenantID, reqBody.Status); err != nil {
+		slog.Error("Failed to update exception case status", "id", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update exception case")
+		return
+	}
+
+	// Resolve the actor from the authenticated principal (fall back to "api").
+	actor := "api"
+	if u := auth.FromContext(ctx); u != nil {
+		actor = u.ID
+		if actor == "" {
+			actor = u.Email
+		}
+	}
+
+	// Record the transition in the audit log.
+	auditEvent := &domain.AuditEvent{
+		TenantID:   tenantID,
+		Actor:      actor,
+		Action:     "EXCEPTION_STATUS_CHANGED",
+		TargetType: "exception_case",
+		TargetID:   id,
+		OldState:   oldStatus,
+		NewState:   reqBody.Status,
+		Timestamp:  time.Now().UTC(),
+	}
+	if reqBody.Note != "" {
+		auditEvent.Error = reqBody.Note
+	}
+	if err := s.db.AppendAuditEvent(ctx, auditEvent); err != nil {
+		// Audit is best-effort; log but do not fail the transition.
+		slog.Error("Failed to append audit event for exception status change", "id", id, "err", err)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":     id,
+		"status": reqBody.Status,
+	})
+}
+
+// signalsHandler handles GET /signals/{id}.
+//
+// It probes the dedicated manufacturing tables (PO -> GRN -> Invoice) in order
+// and returns the first match with a `document_type` discriminator. Tenant
+// isolation is enforced by every Get*ByID call (ErrNotFound for other tenants).
+// Thin handler: no business logic.
+func (s *ServerDeps) signalsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	t := tenant.FromContext(r.Context())
+	tenantID := t.ID
+
+	id := strings.TrimPrefix(r.URL.Path, "/signals/")
+	id = strings.TrimRight(id, "/")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "Missing signal ID")
+		return
+	}
+
+	ctx := r.Context()
+
+	if po, err := s.db.GetPurchaseOrderByID(ctx, id, tenantID); err == nil && po != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"document_type": "PURCHASE_ORDER",
+			"id":            po.ID,
+			"data":          po,
+		})
+		return
+	}
+	if gr, err := s.db.GetGoodsReceiptByID(ctx, id, tenantID); err == nil && gr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"document_type": "GOODS_RECEIPT",
+			"id":            gr.ID,
+			"data":          gr,
+		})
+		return
+	}
+	if inv, err := s.db.GetInvoiceByID(ctx, id, tenantID); err == nil && inv != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"document_type": "INVOICE",
+			"id":            inv.ID,
+			"data":          inv,
+		})
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "Signal not found")
+}
+
+// exceptionsHandler handles GET /exceptions.
+//
+// Lists ExceptionCase rows for the tenant, optionally filtered by `status` and
+// `type` query params, with `limit`/`offset` pagination. Deterministic.
+func (s *ServerDeps) exceptionsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	t := tenant.FromContext(r.Context())
+	tenantID := t.ID
+
+	q := r.URL.Query()
+	status := q.Get("status")
+	mismatchType := q.Get("type")
+	limit := 50
+	if l := q.Get("limit"); l != "" {
+		if v := parseInt(l); v > 0 && v <= 200 {
+			limit = v
+		}
+	}
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		if v := parseInt(o); v >= 0 {
+			offset = v
+		}
+	}
+
+	cases, err := s.db.ListExceptionCases(r.Context(), tenantID, status, mismatchType, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": cases})
+}
+
+// exceptionByIDHandler handles GET /exceptions/{id}.
+func (s *ServerDeps) exceptionByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	t := tenant.FromContext(r.Context())
+	tenantID := t.ID
+
+	id := strings.TrimPrefix(r.URL.Path, "/exceptions/")
+	id = strings.TrimRight(id, "/")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "Missing exception case ID")
+		return
+	}
+
+	ec, err := s.db.GetExceptionCaseByID(r.Context(), id, tenantID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Exception case not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, ec)
+}
+
+// opsSummaryHandler handles GET /ops/summary.
+//
+// Returns a deterministic manufacturing control-tower summary for the tenant:
+// counts of POs/GRNs/Invoices and open exceptions (total + by severity). No
+// fields without a data source are invented.
+func (s *ServerDeps) opsSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	t := tenant.FromContext(r.Context())
+	tenantID := t.ID
+	ctx := r.Context()
+
+	pos, _ := s.db.ListPurchaseOrders(ctx, tenantID, 1, 0)
+	grns, _ := s.db.ListGoodsReceipts(ctx, tenantID, "", 1, 0)
+	invs, _ := s.db.ListInvoices(ctx, tenantID, "", 1, 0)
+	openCases, _ := s.db.ListExceptionCases(ctx, tenantID, domain.ExceptionStatusOpen, "", 1000, 0)
+
+	bySeverity := map[string]int{}
+	for _, ec := range openCases {
+		bySeverity[string(ec.Severity)]++
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tenant_id":                   tenantID,
+		"purchase_orders":             len(pos),
+		"goods_receipts":              len(grns),
+		"invoices":                    len(invs),
+		"open_exceptions":             len(openCases),
+		"open_exceptions_by_severity": bySeverity,
+		"generated_at":                time.Now().UTC(),
+	})
+}
+
 // adminDashboardHandler handles GET /admin/dashboard — consolidated tenant dashboard summary.
 func (s *ServerDeps) adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -1605,6 +2041,16 @@ func main() {
 			auth.RequirePermission(domain.PermissionDocumentUpload)(uploadHandler),
 		),
 	))
+	signalUploadHandler := usageMW.CheckLimit(domain.MetricDocumentsUploaded)(
+		usageMW.IncrementOnResponse(domain.MetricDocumentsUploaded)(
+			http.HandlerFunc(deps.signalsUploadHandler),
+		),
+	)
+	mux.Handle("/signals/upload", authMW.Wrap(
+		rl.Middleware(
+			auth.RequirePermission(domain.PermissionDocumentUpload)(signalUploadHandler),
+		),
+	))
 	mux.Handle("/status/summary", authMW.Wrap(rl.Middleware(http.HandlerFunc(deps.statusSummaryHandler))))
 	mux.Handle("/jobs/recent", authMW.Wrap(rl.Middleware(http.HandlerFunc(deps.recentJobsHandler))))
 	mux.Handle("/jobs/", authMW.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1626,6 +2072,23 @@ func main() {
 	mux.Handle("/admin/review-queue/", authMW.Wrap(rl.Middleware(auth.RequirePermission(domain.PermissionReviewQueue)(http.HandlerFunc(deps.reviewQueueByIDHandler)))))
 	mux.Handle("/admin/dashboard", authMW.Wrap(rl.Middleware(auth.RequirePermission(domain.PermissionMetricsView)(http.HandlerFunc(deps.adminDashboardHandler)))))
 	mux.Handle("/admin/usage", authMW.Wrap(rl.Middleware(auth.RequirePermission(domain.PermissionAdmin)(http.HandlerFunc(deps.adminUsageHandler)))))
+
+	// Exception case read + lifecycle.
+	// GET /exceptions            -> list (read permission).
+	// GET /exceptions/{id}       -> single (read permission).
+	// POST /exceptions/{id}/resolve -> lifecycle transition (review-queue permission).
+	mux.Handle("/exceptions", authMW.Wrap(rl.Middleware(http.HandlerFunc(deps.exceptionsHandler))))
+	mux.Handle("/exceptions/", authMW.Wrap(rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			auth.RequirePermission(domain.PermissionReviewQueue)(http.HandlerFunc(deps.resolveExceptionHandler)).ServeHTTP(w, r)
+			return
+		}
+		http.HandlerFunc(deps.exceptionByIDHandler).ServeHTTP(w, r)
+	}))))
+	mux.Handle("/ops/summary", authMW.Wrap(rl.Middleware(http.HandlerFunc(deps.opsSummaryHandler))))
+
+	// Manufacturing signal read: GET /signals/{id} probes PO -> GRN -> Invoice.
+	mux.Handle("/signals/", authMW.Wrap(rl.Middleware(http.HandlerFunc(deps.signalsHandler))))
 
 	// Start worker goroutines.
 	workerCtx, workerCancel := context.WithCancel(context.Background())

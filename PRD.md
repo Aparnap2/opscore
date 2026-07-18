@@ -10,22 +10,46 @@
 
 ## Implementation Progress
 
-> Checkpoint `pivot-phase-1.3-complete` (commit `5001cbf`). This milestone is a
-> coherent internal boundary: deterministic domain logic + transitional
-> agent/worker wiring, no schema expansion yet.
+> Checkpoint `pivot-phase-1.3-complete` (commit `5001cbf`) is the coherent internal
+> boundary: deterministic domain logic + transitional agent/worker wiring, no schema
+> expansion yet. The manufacturing pivot is now landing in parallel across phases
+> 1.4A–1.4B (persistence + API) and 2–7 (agent persistence, read model, ops
+> endpoints, exception lifecycle, bridge retirement). The status below reflects what
+> is **code-complete**, **in-flight**, or **planned** as of branch
+> `feat/manufacturing-pivot-persistence`. Claims are traced to source; items without
+> code are marked **planned** and will be corrected by the lead agent once tests go green.
 
 ### Phase 1 — Signal Ingestion + Mismatch Detection
 
 | Sub-phase | Status | What landed |
 | --------- | ------ | ----------- |
-| 1.1 Domain entities | ✅ Done | `PurchaseOrder`, `GoodsReceipt`, `Invoice` (zero-I/O, tenant_id + version, GSTIN-validated) |
-| 1.2 Mismatch engine | ✅ Done | `DetectMismatch` (line match by `POLineRef` + ItemCode fallback), `ExceptionCase` typed output, 6 mismatch types (MISSING_GRN, PARTIAL_RECEIPT, QTY/PRICE/TAX_VARIANCE, VENDOR_MISMATCH), tenant-scoped `IsDuplicate` |
-| 1.3 Agent/worker wiring | ✅ Done | GRN classifier, zero-I/O OCR mapper (`OCRPayload`), `SignalAgent` reusing `DocumentAgent` OCR+classifier, HITL for low confidence / validation errors / GSTIN conflicts / payment-affecting mismatches, `QueueSignal` + `processSignalJob`. Transitional persistence in `jobs.extracted_data` |
+| 1.1 Domain entities | ✅ Done | `PurchaseOrder`, `GoodsReceipt`, `Invoice` (zero-I/O, `tenant_id` + `version`, GSTIN-validated) — `internal/domain/purchase_order.go`, `goods_receipt.go`, `invoice.go` |
+| 1.2 Mismatch engine | ✅ Done | `DetectMismatch` (line match by `POLineRef` + `ItemCode` fallback), `ExceptionCase` typed output, 7 mismatch types (`MISSING_GRN`, `PARTIAL_RECEIPT`, `QTY_VARIANCE`, `PRICE_VARIANCE`, `TAX_VARIANCE`, `MISSING_INVOICE`, `VENDOR_MISMATCH`), tenant-scoped `IsDuplicate` — `internal/domain/mismatch.go` |
+| 1.3 Agent/worker wiring | ✅ Done | GRN classifier, zero-I/O OCR mapper (`OCRPayload`, `MapOCRTo*`), `SignalAgent` reusing `DocumentAgent` OCR+classifier, HITL for low confidence / validation errors / GSTIN conflicts / payment-affecting mismatches, `QueueSignal` constant + `processSignalJob` worker — `cmd/server/worker.go:179`. Transitional persistence in `jobs.extracted_data` |
 
-### Next milestone (not started)
+### Phase 1.4 — Persistence + API Surface
 
-- **Phase 1.4A — Persistence:** dedicated `purchase_orders` / `goods_receipts` / `invoices` tables with `tenant_id`, RLS, `version`, indexes; explicit `DBProvider` methods; Postgres adapter; integration tests for RLS + optimistic locking + round-trip.
-- **Phase 1.4B — API surface:** `POST /signals/upload` mirroring the existing upload middleware chain (auth, tenant, rate-limit, usage); endpoint + E2E tests. `jobs.extracted_data` stays as a compatibility bridge until table-backed reads are green.
+| Sub-phase | Status | What landed |
+| --------- | ------ | ----------- |
+| 1.4A Persistence | ✅ **Code-complete** | Migration v6 creates 7 tables (`purchase_orders`+lines, `goods_receipts`+lines, `invoices`+lines, `exception_cases`) with `tenant_id` + RLS + `version` + indexes — `internal/adapters/postgres/migrations.go:259`. Explicit `DBProvider` methods (`UpsertPurchaseOrder`, `GetPurchaseOrderByID`, `ListPurchaseOrders`, `UpsertGoodsReceipt`, `UpsertInvoice`, `UpsertExceptionCase`, `GetExceptionCaseByID`, `ListExceptionCases`, `UpdateExceptionCaseStatus`) — `internal/providers/interfaces.go:93-111`. Integration tests for RLS + optimistic locking + round-trip — `internal/adapters/postgres/manufacturing_test.go`. `jobs.extracted_data` retained as transitional bridge. |
+| 1.4B API surface (`/signals/upload`) | ✅ **Code-complete** | `QueueSignal` + `processSignalJob` worker path are real (`cmd/server/worker.go:32,179`). The HTTP route `POST /signals/upload` **is registered** in `cmd/server/main.go:1807` (auth/tenant/rate-limit/usage middleware chain reused from `/upload`). Endpoint + E2E tests pending. |
+
+### Phase 2 — Agent Persistence (table-backed writes)
+
+| Sub-phase | Status | What landed |
+| --------- | ------ | ----------- |
+| 2. Signal entity persistence | ✅ **Complete** | `agents.PersistSignalResult` writes `PurchaseOrder`/`GoodsReceipt`/`Invoice`/`ExceptionCase` to the real tables — `internal/agents/signal_agent.go:164`, **invoked** from `processSignalJob` at `cmd/server/worker.go:241`. The job record still carries a traceability summary in `jobs.extracted_data` (bridge retained through PHASE 7). |
+
+### Phase 3–8 — Read Model, Ops Endpoints, Exception Lifecycle, Bridge Retirement, Quality Gate
+
+| Phase | Status | Notes |
+| ----- | ------ | ----- |
+| 3 `/signals/upload` + signal-queue consumer hardening | ✅ **Code-complete** | `POST /signals/upload` route registered (`cmd/server/main.go:2049`) mirroring the `/upload` middleware chain (auth → rate-limit → usage → `PermissionDocumentUpload`). Enqueues `agents.SignalJob` to `QueueSignal`; `processSignalJob` consumes and persists via `agents.PersistSignalResult`. Integration tests green — `tests/integration/signals_upload_test.go`. |
+| 4 Ops read model (`GET /ops/summary`, `GET /exceptions`, `GET /exceptions/{id}`, `GET /signals/{id}`) | ✅ **Code-complete** | Handlers `signalsHandler`, `exceptionsHandler`, `exceptionByIDHandler`, `opsSummaryHandler` registered in `cmd/server/main.go:1949+`. `GET /signals/{id}` probes PO→GRN→Invoice with a `document_type` discriminator. Integration tests green — `tests/integration/signals_read_test.go`. |
+| 5 Exception lifecycle + audit transitions | ✅ **Code-complete** | `POST /exceptions/{id}/resolve` (`resolveExceptionHandler`, `cmd/server/main.go:1233`) transitions OPEN→ACKNOWLEDGED→RESOLVED→DISMISSED, validating against domain constants and appending an `EXCEPTION_STATUS_CHANGED` `AuditEvent` on every transition (tenant isolation via `GetExceptionCaseByID`). Integration tests green — `tests/integration/signals_read_test.go` (`TestExceptionLifecycle_*`). |
+| 6 Documentation convergence (this ADR/PRD pass) | 🔄 **In progress** | PRD + ADR set updated to reflect actual implemented state (truth-from-code). No new runtime code. |
+| 7 Transitional bridge retirement | ⬜ **Pending** | Criteria + plan tracked in ADR-0026 (Proposed). |
+| 8 Quality gate (integration + e2e green for read/exception paths) | ⬜ **Pending** | Blocked on PHASE 4/5 handler registration + tests. |
 
 ### Guardrails held at this checkpoint
 
@@ -36,7 +60,7 @@
 
 ## Architecture Decisions
 
-OpsCore's design is governed by Architecture Decision Records (ADRs) in `docs/architecture/adr/`. The existing ADR discipline remains valid, but the product framing shifts from back-office autonomy to an agentic operations control tower for MSME manufacturing. Accepted platform ADRs for tenant isolation, queue semantics, observability, deployment target, and review-queue UX remain foundational and should be preserved. [file:893]
+OpsCore's design is governed by Architecture Decision Records (ADRs) in `docs/architecture/adr/`. The existing ADR discipline remains valid, but the product framing shifts from generic back-office automation to an agentic **manufacturing control tower** for MSME manufacturers, focused on PO/GRN/Invoice ingestion, deterministic mismatch detection, exception cases, and human-in-the-loop resolution. Accepted platform ADRs for tenant isolation, queue semantics, observability, deployment target, and review-queue UX remain foundational and should be preserved. [file:893]
 
 Recommended active ADR set for v6.0:
 
@@ -62,12 +86,18 @@ Recommended active ADR set for v6.0:
 | 0020 | Review Queue and Operator UX Boundary                | Accepted |
 | 0021 | Risk Detection and Action Orchestration Policy       | Proposed |
 | 0022 | ERP / Sheets / Slack Integration Boundary            | Proposed |
+| 0023 | Manufacturing Entity Persistence Model              | Accepted |
+| 0024 | Signal Ingestion API Boundary                       | Proposed |
+| 0025 | Exception & Risk Lifecycle + Audit                  | Proposed |
+| 0026 | Transitional Bridge Retirement                      | Proposed |
 
 ---
 
 ## One Paragraph Description
 
-OpsCore is a multi-tenant agentic operations control tower for MSME manufacturers. It ingests fragmented operational signals from purchase orders, goods receipts, invoices, stock sheets, ERP exports, supplier messages, and uploaded documents; builds a live operational state; detects emerging risks such as material delays, blocked payments, stock-out threats, and repeat vendor failures; explains likely root causes; and coordinates next-best actions through specialized agents, deterministic policy rules, and human approvals in Slack. The platform is built in Go with a deterministic-first architecture, using AI only for document understanding, summarization, and evidence-backed reasoning where static rules are insufficient. [cite:688][cite:689]
+OpsCore is a multi-tenant agentic **manufacturing control tower** for MSME manufacturers. It ingests fragmented operational signals from purchase orders, goods receipts, invoices, and uploaded documents; normalizes them into canonical entities; detects mismatches across the PO → GRN → Invoice flow (missing GRNs, partial receipts, quantity/price/tax variances, vendor conflicts) deterministically; raises typed exception cases; and routes payment-affecting or low-confidence cases to human approval in Slack. The platform is built in Go with a deterministic-first architecture, using AI only for document understanding and extraction repair where static rules are insufficient. [cite:688][cite:689]
+
+> **Scope note:** The "live operational state", "root-cause explanation", "next-best action coordination", and "stock-out / material-delay risk" framing in earlier drafts describe the **target** control-tower vision. As of this checkpoint, the **implemented** core is PO/GRN/Invoice ingestion, deterministic mismatch detection, exception cases, HITL, tenant isolation, audit, and usage. Entities and endpoints beyond that (inventory, risk signals, root-cause, action plans, briefings) are **planned** — see "Future / not yet implemented" under Data Model.
 
 ---
 
@@ -132,15 +162,52 @@ OpsCore is therefore not a free-roaming chatbot. It is a governed control tower 
 
 ## Product Scope
 
-### In Scope for v6.0
-- Multi-tenant SaaS platform for MSME manufacturing operations.
-- Signal ingestion from uploads, ERP exports, Google Sheets, and supplier-facing documents.
-- Unified operational state across procurement, receipts, invoices, inventory, and vendor issues.
-- Risk detection for shortages, delays, mismatches, blocked payments, and unresolved exceptions.
-- Root-cause explanation and evidence synthesis.
-- Action orchestration through Slack and admin APIs.
-- Human-in-the-loop review for sensitive actions.
-- Audit logs, usage metering, observability, and testable workflows.
+### In Scope for v6.0 (supported capabilities — manufacturing control tower)
+
+OpsCore is framed as a **manufacturing control tower** for the following *implemented or
+in-flight* capabilities only. Every item below traces to code in this branch.
+
+**Implemented / in-flight (traced to code):**
+- Multi-tenant SaaS platform for MSME manufacturing operations (tenant isolation + RLS: `migrations.go` v5/v6).
+- Signal ingestion from uploads (PO/GRN/Invoice documents) via `/upload` and `/signals/upload` (`cmd/server/main.go:1807`, `worker.go:179`).
+- Deterministic mismatch detection across PO → GRN → Invoice (`DetectMismatch`, `internal/domain/mismatch.go`).
+- Exception cases with typed mismatch classes and a lifecycle state machine (`exception_cases` table, `mismatch.go:63-68`).
+- Human-in-the-loop review for sensitive actions (Slack + `/admin/review-queue`, `cmd/server/main.go:1829`).
+- Audit logs (`AppendAuditEvent`), usage metering, observability, and testable workflows.
+- First-class persistence of PO/GRN/Invoice + exception entities (Phase 1.4A + Phase 2; `manufacturing_test.go` integration tests green).
+
+### Future / Planned (not yet implemented)
+
+The following PRD features have **no domain model and no code** in this branch. They are
+recorded as the target control-tower vision, not as shipped features. Each is marked
+**planned** wherever it appears in this document.
+
+**Entities (no code):**
+- Site
+- Item (catalog master — distinct from the `ItemCode` string carried on lines)
+- InventorySnapshot
+- RiskSignal (entity — risk is currently derived from `exception_cases`, not a separate table; see ADR-0025)
+- RootCauseHypothesis
+- ActionPlan
+- CoordinationTask
+- DailyBriefing
+
+**Endpoints (no code / no handler registered):**
+- `POST /signals/import/erpnext`
+- `POST /signals/import/sheets`
+- `GET /ops/priority-queue`
+- `GET /risks`, `GET /risks/{id}`
+- `GET /briefings/latest`
+- `GET /vendors/{id}/history`
+- `GET /materials/{id}/risk`
+- `POST /actions/{id}/approve`, `POST /actions/{id}/send`
+
+**Capabilities (no code):**
+- Unified operational state across procurement, receipts, invoices, inventory, and vendor issues (read model — Phase 4).
+- Risk detection for shortages, delays, and material stock-out (derived risk — Phase 5/6; see ADR-0025).
+- Root-cause explanation and evidence synthesis (Root Cause Agent — Phase 6).
+- Action orchestration through Slack and admin APIs (Action Agent — Phase 6).
+- Daily operational briefing (Supervisor Agent — Phase 6).
 
 ### Out of Scope for v6.0
 - MES replacement.
@@ -195,46 +262,46 @@ Convert fragmented inputs into a live operational state model:
 - vendor issue patterns,
 - material availability and risk.
 
-### 3. Risk Detection
-Detect and rank issues such as:
-- missing GRN,
-- invoice mismatch,
-- duplicate invoice,
-- delayed receipt,
-- unusual vendor failure pattern,
-- blocked payment,
-- material shortage risk.
+### 3. Risk Detection — 🔄 partial (mismatch detection done; shortage/delay risk **planned**, ADR-0025)
+  Detect and rank issues such as:
+  - missing GRN,
+  - invoice mismatch,
+  - duplicate invoice,
+  - delayed receipt,
+  - unusual vendor failure pattern,
+  - blocked payment,
+  - material shortage risk (**planned** — no code).
 
-### 4. Root Cause Copilot
-Explain:
-- what happened,
-- why the system thinks it happened,
-- what evidence supports that hypothesis,
-- which downstream entities are affected.
+### 4. Root Cause Copilot — ⬜ **planned** (no code)
+  Explain:
+  - what happened,
+  - why the system thinks it happened,
+  - what evidence supports that hypothesis,
+  - which downstream entities are affected.
 
-### 5. Action Orchestration
-Generate or coordinate:
-- supplier follow-up drafts,
-- owner escalation notes,
-- review packets,
-- hold / approve / investigate actions,
-- revisit reminders for unresolved incidents.
+### 5. Action Orchestration — ⬜ **planned** (no code)
+  Generate or coordinate:
+  - supplier follow-up drafts,
+  - owner escalation notes,
+  - review packets,
+  - hold / approve / investigate actions,
+  - revisit reminders for unresolved incidents.
 
-### 6. Human Review
-Route sensitive or low-confidence cases to Slack or admin review:
-- payment-affecting mismatches,
-- low-confidence extraction,
-- high-severity material risk,
-- conflicting evidence.
+### 6. Human Review — ✅ implemented (Slack + `/admin/review-queue`)
+  Route sensitive or low-confidence cases to Slack or admin review:
+  - payment-affecting mismatches,
+  - low-confidence extraction,
+  - high-severity material risk (**planned**),
+  - conflicting evidence.
 
-### 7. Supervisor Digest
-Produce:
-- daily operations briefing,
-- top priority queue,
-- blocked value summary,
-- at-risk materials,
-- repeat supplier issues,
-- aging unresolved exceptions.
+### 7. Supervisor Digest — ⬜ **planned** (no code)
+  Produce:
+  - daily operations briefing,
+  - top priority queue,
+  - blocked value summary,
+  - at-risk materials,
+  - repeat supplier issues,
+  - aging unresolved exceptions.
 
 ---
 
@@ -269,15 +336,16 @@ This stack preserves the strengths of v5.0 while shifting the product purpose fr
 
 OpsCore uses specialized agents with bounded responsibilities.
 
-| Agent            | Purpose                                                      |
-| ---------------- | ------------------------------------------------------------ |
-| Signal Agent     | Classify and normalize incoming operational signals          |
-| State Agent      | Build and update live operational state                      |
-| Risk Agent       | Detect anomalies, shortages, delays, mismatches, and blocked flows |
-| Root Cause Agent | Synthesize likely causes and supporting evidence             |
-| Action Agent     | Recommend next actions and draft follow-up/escalation content |
-| Review Agent     | Prepare HITL packets and route approvals                     |
-| Supervisor Agent | Generate daily and on-demand operational briefings           |
+| Agent            | Purpose                                                      | Status |
+| ---------------- | ------------------------------------------------------------ | ------ |
+| Signal Agent     | Classify and normalize incoming operational signals (PO/GRN/Invoice) | ✅ implemented (`internal/agents`, `cmd/server/worker.go:179`) |
+| Document Agent   | OCR + classify uploaded documents (reused by Signal Agent)  | ✅ implemented |
+| State Agent      | Build and update live operational state                      | ⬜ planned (Phase 4 read model) |
+| Risk Agent       | Detect anomalies, shortages, delays, mismatches, and blocked flows | 🔄 partial — mismatch detection done; shortage/delay risk planned (Phase 5/6, ADR-0025) |
+| Root Cause Agent | Synthesize likely causes and supporting evidence             | ⬜ planned (Phase 6) |
+| Action Agent     | Recommend next actions and draft follow-up/escalation content | ⬜ planned (Phase 6) |
+| Review Agent     | Prepare HITL packets and route approvals                     | ✅ implemented (Slack + `/admin/review-queue`) |
+| Supervisor Agent | Generate daily and on-demand operational briefings           | ⬜ planned (Phase 6) |
 
 ### Design Rules
 - Agents may reason, route, summarize, and propose.
@@ -314,29 +382,29 @@ OpsCore uses specialized agents with bounded responsibilities.
 3. Detect pending, resolved, and ambiguous linkages.
 4. Maintain current state for API, agents, and briefings.
 
-### Workflow 3: Risk Detection
-1. Evaluate deterministic risk rules.
-2. Score issue severity and likely impact.
-3. Group related signals into an incident or exception case.
-4. Route to root-cause or action workflows.
+### Workflow 3: Risk Detection — ⬜ **planned** (no code; mismatch detection in Workflow 1 is implemented)
+  1. Evaluate deterministic risk rules.
+  2. Score issue severity and likely impact.
+  3. Group related signals into an incident or exception case.
+  4. Route to root-cause or action workflows.
 
-### Workflow 4: Root-Cause Analysis
-1. Gather supporting records and prior incidents.
-2. Build evidence set.
-3. Generate root-cause hypothesis with confidence.
-4. Determine what downstream workflows may be affected.
+### Workflow 4: Root-Cause Analysis — ⬜ **planned** (no code)
+  1. Gather supporting records and prior incidents.
+  2. Build evidence set.
+  3. Generate root-cause hypothesis with confidence.
+  4. Determine what downstream workflows may be affected.
 
-### Workflow 5: Action Orchestration
-1. Choose next-best action using policy and issue class.
-2. Draft supplier/internal communication if needed.
-3. Create review request or execute low-risk action.
-4. Schedule revisit/escalation timers for unresolved issues.
+### Workflow 5: Action Orchestration — ⬜ **planned** (no code)
+  1. Choose next-best action using policy and issue class.
+  2. Draft supplier/internal communication if needed.
+  3. Create review request or execute low-risk action.
+  4. Schedule revisit/escalation timers for unresolved issues.
 
-### Workflow 6: Supervisor Digest
-1. Aggregate current issues by urgency and impact.
-2. Rank top risks.
-3. Summarize blocked value, supplier patterns, and material exposure.
-4. Deliver digest through API and Slack.
+### Workflow 6: Supervisor Digest — ⬜ **planned** (no code)
+  1. Aggregate current issues by urgency and impact.
+  2. Rank top risks.
+  3. Summarize blocked value, supplier patterns, and material exposure.
+  4. Deliver digest through API and Slack.
 
 ---
 
@@ -351,19 +419,26 @@ OpsCore uses specialized agents with bounded responsibilities.
 - HITLRequest
 - UsageRecord
 
-### Add / Elevate Manufacturing Entities
+### Add / Elevate Manufacturing Entities — **Implemented (code-complete or in-flight)**
+
+These entities have domain models and/or persistence tables in the codebase today:
+
+- **PurchaseOrder** + **PurchaseOrderLine** — `internal/domain/purchase_order.go`; tables `purchase_orders` + `purchase_order_lines` (migration v6)
+- **GoodsReceipt** + **GoodsReceiptLine** — `internal/domain/goods_receipt.go`; tables `goods_receipts` + `goods_receipt_lines`
+- **Invoice** + **InvoiceLine** — `internal/domain/invoice.go`; tables `invoices` + `invoice_lines`
+- **ExceptionCase** — `internal/domain/mismatch.go` (`Type`, `Severity`, `Status`, lifecycle `OPEN`→`ACKNOWLEDGED`→`RESOLVED`→`DISMISSED`); table `exception_cases`
+- **Vendor** — pre-existing domain entity; reused for risky-vendor reads (`GetRiskyVendors`, `interfaces.go:118`)
+
+### Future / not yet implemented
+
+The following entities appear in earlier PRD drafts but have **no domain model and no
+code** as of this checkpoint. They are recorded here as the target control-tower vision,
+not as shipped features:
+
 - Site
-- Vendor
-- Item
-- PurchaseOrder
-- PurchaseOrderLine
-- GoodsReceipt
-- GoodsReceiptLine
-- Invoice
-- InvoiceLine
+- Item (catalog master — distinct from the `ItemCode` string carried on lines)
 - InventorySnapshot
-- RiskSignal
-- ExceptionCase
+- RiskSignal (entity — risk is currently derived from `exception_cases`, not a separate table; see ADR-0025)
 - RootCauseHypothesis
 - ActionPlan
 - CoordinationTask
@@ -371,8 +446,8 @@ OpsCore uses specialized agents with bounded responsibilities.
 
 ### Key Modeling Principle
 The system stores both:
-- **transactional facts**: POs, receipts, invoices, stock, messages;
-- **operational interpretations**: risks, incidents, root causes, action plans.
+- **transactional facts**: POs, receipts, invoices (implemented);
+- **operational interpretations**: exceptions/mismatches (implemented via `exception_cases`); risks, incidents, root causes, action plans (planned).
 
 This is the difference between a record-keeping system and a control tower.
 
@@ -390,24 +465,30 @@ This is the difference between a record-keeping system and a control tower.
 - `POST /slack/webhook`
 
 ### New Core Endpoints
-- `POST /signals/upload`
-- `POST /signals/import/erpnext`
-- `POST /signals/import/sheets`
-- `GET /ops/summary`
-- `GET /ops/priority-queue`
-- `GET /exceptions`
-- `GET /exceptions/{id}`
-- `POST /exceptions/{id}/resolve`
-- `GET /risks`
-- `GET /risks/{id}`
-- `GET /briefings/latest`
-- `GET /vendors/{id}/history`
-- `GET /materials/{id}/risk`
-- `POST /actions/{id}/approve`
-- `POST /actions/{id}/send`
 
-### Example Product-Level Response
-`GET /ops/summary`
+Legend: ✅ registered route · 🔄 in progress (worker/route partial) · ⬜ **planned** (no code / no handler)
+
+| Method | Endpoint | Status | Trace |
+| ------ | -------- | ------ | ----- |
+| POST | `/upload` | ✅ exists (legacy doc ingestion) | `cmd/server/main.go:195` |
+| POST | `/signals/upload` | ✅ exists (registered `main.go:1807`; worker `processSignalJob` + `QueueSignal` real) | `cmd/server/worker.go:32,179` |
+| GET | `/signals/{id}` | ⬜ **planned** — no handler registered | — |
+| GET | `/exceptions` | ⬜ **planned** — `ListExceptionCases` exists on `DBProvider` (`interfaces.go:110`) but no HTTP handler | — |
+| GET | `/exceptions/{id}` | ⬜ **planned** — `GetExceptionCaseByID` exists (`interfaces.go:109`) but no HTTP handler | — |
+| POST | `/exceptions/{id}/resolve` | ⬜ **planned** — no handler; lifecycle constants exist (`mismatch.go:63-68`) | — |
+| GET | `/ops/summary` | ⬜ **planned** (Phase 4) — no handler | — |
+
+The following endpoints from earlier drafts have **no code and no domain model** and are
+moved to the Future section (see "Future / Planned" above): `POST /signals/import/erpnext`,
+`POST /signals/import/sheets`, `GET /ops/priority-queue`, `GET /risks`, `GET /risks/{id}`,
+`GET /briefings/latest`, `GET /vendors/{id}/history`, `GET /materials/{id}/risk`,
+`POST /actions/{id}/approve`, `POST /actions/{id}/send`.
+
+### Example Product-Level Response (planned — `GET /ops/summary`, Phase 4)
+
+> This response shape is **planned**, not implemented. It is included to communicate the
+> target read-model contract; the underlying aggregation has no code yet.
+
 ```json
 {
   "critical_risks": 3,

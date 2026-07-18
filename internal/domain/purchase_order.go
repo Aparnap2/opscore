@@ -25,6 +25,8 @@ type PurchaseOrder struct {
 	OrderDate   time.Time           `json:"order_date"`
 	Lines       []PurchaseOrderLine `json:"lines"`
 	Version     int                 `json:"version"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
 
 // Validate checks the PO for required fields and deterministic business rules.

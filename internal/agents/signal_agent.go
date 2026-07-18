@@ -145,6 +145,54 @@ type SignalRelated struct {
 	Invoices []domain.Invoice
 }
 
+// PersistSignalResult writes the deterministic manufacturing entities produced by
+// ProcessSignal into the real persistence tables (PO / GRN / Invoice /
+// ExceptionCase). It is the PHASE 2 bridge that moves the signal workflow off the
+// transitional jobs.extracted_data bridge and onto the dedicated manufacturing
+// tables.
+//
+// This is an orchestration helper (not domain logic): it routes a SignalResult to
+// its storage sink via the DBProvider interface. Domain stays zero-I/O; the
+// routing decision (which table, idempotency, tenant scoping) is deterministic and
+// lives here rather than in cmd/*. The job record remains the traceability summary
+// and is persisted separately by the worker.
+//
+// Tenant scoping is enforced defensively: any ExceptionCase whose TenantID is
+// blank inherits the job's tenant, and a blank Status defaults to
+// ExceptionStatusOpen, so the write is always correctly RLS-scoped and carries a
+// valid lifecycle state even when the domain mapper left those fields unset.
+func PersistSignalResult(ctx context.Context, db providers.DBProvider, job *SignalJob, result *SignalResult) error {
+	switch entity := result.Mapped.(type) {
+	case *domain.PurchaseOrder:
+		if err := db.UpsertPurchaseOrder(ctx, entity); err != nil {
+			return fmt.Errorf("upsert purchase order: %w", err)
+		}
+	case *domain.GoodsReceipt:
+		if err := db.UpsertGoodsReceipt(ctx, entity); err != nil {
+			return fmt.Errorf("upsert goods receipt: %w", err)
+		}
+	case *domain.Invoice:
+		if err := db.UpsertInvoice(ctx, entity); err != nil {
+			return fmt.Errorf("upsert invoice: %w", err)
+		}
+	}
+
+	for i := range result.Exceptions {
+		ec := &result.Exceptions[i]
+		if ec.TenantID == "" {
+			ec.TenantID = job.TenantID
+		}
+		if ec.Status == "" {
+			ec.Status = domain.ExceptionStatusOpen
+		}
+		if err := db.UpsertExceptionCase(ctx, ec); err != nil {
+			return fmt.Errorf("upsert exception case: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // signalHITLPolicy decides human review deterministically:
 //   - OCR confidence below threshold
 //   - any validation error (e.g. invalid GSTIN, missing fields)

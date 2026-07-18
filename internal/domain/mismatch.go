@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"math"
+	"time"
 )
 
 // round2 rounds a float to 2 decimal places deterministically.
@@ -36,16 +37,35 @@ const (
 
 // ExceptionCase is a typed, deterministic output of mismatch detection.
 // It maps cleanly into DB tables, audit events, and HITL routing.
+//
+// Persistence identity fields (ID, TenantID, Status) are part of the domain
+// model because they are pure data — no I/O is performed here. The DB adapter
+// is responsible for hydrating them on read and persisting them on write.
+// Status uses the lifecycle values "OPEN", "ACKNOWLEDGED", "RESOLVED",
+// "DISMISSED" (see ExceptionStatus* constants).
 type ExceptionCase struct {
+	ID             string            `json:"id"`
+	TenantID       string            `json:"tenant_id"`
 	Type           MismatchType      `json:"type"`
 	Severity       ExceptionSeverity `json:"severity"`
+	Status         string            `json:"status"`
 	VendorGSTIN    string            `json:"vendor_gstin"`
 	POLineRef      string            `json:"po_line_ref,omitempty"`
 	GRNLineRef     string            `json:"grn_line_ref,omitempty"`
 	InvoiceLineRef string            `json:"invoice_line_ref,omitempty"`
 	Description    string            `json:"description"`
 	Metadata       map[string]any    `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
+
+// Exception lifecycle statuses (deterministic, no LLM involvement).
+const (
+	ExceptionStatusOpen      string = "OPEN"
+	ExceptionStatusAck       string = "ACKNOWLEDGED"
+	ExceptionStatusResolved  string = "RESOLVED"
+	ExceptionStatusDismissed string = "DISMISSED"
+)
 
 // MismatchTolerance defines the deterministic thresholds used by DetectMismatch.
 // QuantityVariancePct and PriceVariancePct are expressed as percentages (e.g. 2.0 = 2%).
