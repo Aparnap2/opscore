@@ -22,8 +22,13 @@ test-unit:
 
 test-integration:
 	docker compose -f docker-compose.test.yml up -d --wait
-	go test ./tests/... -v -tags integration -timeout 300s
-	docker compose -f docker-compose.test.yml down
+	DATABASE_URL=postgres://opscore:opscore@localhost:15433/opscore?sslmode=disable \
+	REDIS_ADDR=localhost:16379 \
+	TEST_S3_ENDPOINT=localhost:19000 \
+	TEST_S3_ACCESS_KEY=minioadmin \
+	TEST_S3_SECRET_KEY=minioadmin \
+	go test ./tests/integration/... -v -timeout 300s
+	docker compose -f docker-compose.test.yml down -v
 
 test-all: test-unit test-agentic test-isolation
 	@echo "All tests completed."
