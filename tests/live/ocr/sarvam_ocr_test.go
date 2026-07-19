@@ -5,12 +5,27 @@ package ocr
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/aparna/opscore/internal/adapters/sarvam"
 	"github.com/aparna/opscore/tests/live"
 )
+
+// fixturePath resolves a repo-root-relative path regardless of the test's working
+// directory (go test runs from the package dir, not the repo root).
+func fixturePath(t *testing.T, rel string) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("could not determine test source path")
+	}
+	// thisFile = tests/live/ocr/sarvam_ocr_test.go -> repo root is 3 levels up.
+	root := filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
+	return filepath.Join(root, rel)
+}
 
 func init() { live.ResetBudget() }
 
@@ -28,7 +43,7 @@ func TestSarvamOCRLive(t *testing.T) {
 	defer cancel()
 
 	// Try the sample PDF, skip if not present
-	pdfPath := "tests/fixtures/pdfs/sample_invoice.pdf"
+	pdfPath := fixturePath(t, "tests/fixtures/pdfs/sample_invoice.pdf")
 	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
 		t.Skipf("Sample PDF not found at %s", pdfPath)
 	}
