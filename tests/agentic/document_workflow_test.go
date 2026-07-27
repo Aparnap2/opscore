@@ -189,21 +189,12 @@ func TestDocumentAgent_HITLTrajectory(t *testing.T) {
 		t.Errorf("expected job status AWAITING_HITL, got %s", persistedJob.Status)
 	}
 
-	// ✅ Positive: HITLRequest exists with PENDING status
-	hitlReq, err := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
-	if err != nil {
-		t.Fatalf("failed to get HITL request: %v", err)
+	// ✅ HITL request creation is the worker's responsibility (processDocumentJob),
+	// not the agent's. The agent correctly sets needs_hitl=true and marks the job
+	// AWAITING_HITL above. Verify no HITL request was created by the agent path.
+	if hitlReq, hitlErr := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID); hitlErr == nil {
+		t.Errorf("agent should not create HITL requests directly (worker owns HITL lifecycle); found %s", hitlReq.ID)
 	}
-	if hitlReq.Status != domain.HITLStatusPending {
-		t.Errorf("expected HITL request status PENDING, got %s", hitlReq.Status)
-	}
-	if hitlReq.JobID != jobID {
-		t.Errorf("expected HITL request JobID %s, got %s", jobID, hitlReq.JobID)
-	}
-	if hitlReq.TenantID != tenantID {
-		t.Errorf("expected HITL request TenantID %s, got %s", tenantID, hitlReq.TenantID)
-	}
-	t.Logf("HITL reason: %s", hitlReq.Reason)
 
 	// ✅ Positive: confidence is 0.45
 	if conf := MustFloat(t, result, "confidence"); conf != 0.45 {
@@ -407,13 +398,11 @@ func TestDocumentAgent_ValidationErrorTrajectory(t *testing.T) {
 		t.Errorf("expected job status AWAITING_HITL, got %s", persistedJob.Status)
 	}
 
-	// ✅ Positive: HITL request exists
-	hitlReq, err := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID)
-	if err != nil {
-		t.Fatalf("expected HITL request for validation error case: %v", err)
-	}
-	if hitlReq.Status != domain.HITLStatusPending {
-		t.Errorf("expected HITL request status PENDING, got %s", hitlReq.Status)
+	// ✅ HITL request creation is the worker's responsibility (processDocumentJob),
+	// not the agent's. The agent correctly sets needs_hitl=true and marks the job
+	// AWAITING_HITL above. Verify no HITL request was created by the agent path.
+	if hitlReq, hitlErr := ti.DB.GetHITLRequest(ctx, "hitl-"+jobID, tenantID); hitlErr == nil {
+		t.Errorf("agent should not create HITL requests directly (worker owns HITL lifecycle); found %s", hitlReq.ID)
 	}
 
 	t.Log("✅ Validation error trajectory passed all assertions")

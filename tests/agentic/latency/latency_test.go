@@ -510,3 +510,10 @@ func (m *latMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ i
 	return nil, nil
 }
 func (m *latMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }
+func (m *latMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *latMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}

@@ -47,6 +47,14 @@ func NewInMemoryDB() *InMemoryDB {
 // compile-time check
 var _ providers.DBProvider = (*InMemoryDB)(nil)
 
+func (d *InMemoryDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (d *InMemoryDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
+
 // -- Jobs -------------------------------------------------------------------
 
 func (d *InMemoryDB) UpsertJob(_ context.Context, job *domain.Job) error {

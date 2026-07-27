@@ -568,3 +568,10 @@ func (m *vendorMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, 
 	return nil, nil
 }
 func (m *vendorMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }
+func (m *vendorMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *vendorMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}

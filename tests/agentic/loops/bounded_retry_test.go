@@ -190,6 +190,13 @@ func (m *retryMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain.Ve
 func (m *retryMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
 	return nil, nil
 }
+func (m *retryMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *retryMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
 
 // retrySimulator simulates a simple agent workflow with capped retries.
 // It is the in-memory equivalent of the retry logic an agent would use.

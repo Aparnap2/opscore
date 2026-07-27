@@ -622,3 +622,10 @@ func (m *soMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ in
 	return nil, nil
 }
 func (m *soMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }
+func (m *soMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *soMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}

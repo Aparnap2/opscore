@@ -637,3 +637,10 @@ func (m *lrMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ in
 	return nil, nil
 }
 func (m *lrMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }
+func (m *lrMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *lrMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}

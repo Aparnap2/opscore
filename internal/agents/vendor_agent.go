@@ -2,11 +2,9 @@ package agents
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/aparna/opscore/internal/adapters/postgres"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 )
@@ -134,16 +132,8 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (result
 		UpdatedAt:    time.Now(),
 	}
 
-	// Set trust battery tier based on risk score
-	if riskScore >= 80 {
-		vendor.TrustBattery.Tier = domain.TrustTierPreferred
-	} else if riskScore >= 50 {
-		vendor.TrustBattery.Tier = domain.TrustTierStandard
-	} else if riskScore >= 30 {
-		vendor.TrustBattery.Tier = domain.TrustTierProbation
-	} else {
-		vendor.TrustBattery.Tier = domain.TrustTierBlocked
-	}
+	// Use the already-correctly-computed trust tier from lines 109-114
+	vendor.TrustBattery.Tier = trustTier
 
 	if err := a.db.UpsertVendor(ctx, vendor); err != nil {
 		return nil, fmt.Errorf("saving vendor: %w", err)
@@ -166,7 +156,7 @@ func (a *VendorAgent) ProcessVendor(ctx context.Context, job *VendorJob) (result
 	}
 
 	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
-		if errors.Is(err, postgres.ErrVersionConflict) {
+		if a.db.IsVersionConflict(err) {
 			// Retry once
 			existingJob, getErr := a.db.GetJob(ctx, job.JobID, job.TenantID)
 			if getErr == nil {

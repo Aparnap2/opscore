@@ -66,6 +66,14 @@ type QueueMessage struct {
 }
 
 type DBProvider interface {
+	// WithTx runs fn inside a database transaction. If tenantID is non-empty,
+	// the RLS tenant context (app.tenant_id) is set inside the transaction.
+	// If a transaction already exists in the context, it is reused (no nesting).
+	WithTx(ctx context.Context, tenantID string, fn func(context.Context) error) error
+
+	// IsVersionConflict returns true if the error is an optimistic locking version conflict.
+	IsVersionConflict(err error) bool
+
 	UpsertJob(ctx context.Context, job *domain.Job) error
 	GetJob(ctx context.Context, id, tenantID string) (*domain.Job, error)
 	ListJobs(ctx context.Context, tenantID string, workflowType domain.WorkflowType, status domain.JobStatus) ([]*domain.Job, error)

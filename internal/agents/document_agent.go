@@ -2,11 +2,9 @@ package agents
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/aparna/opscore/internal/adapters/postgres"
 	"github.com/aparna/opscore/internal/domain"
 	"github.com/aparna/opscore/internal/providers"
 )
@@ -170,7 +168,7 @@ func (a *DocumentAgent) ProcessDocument(ctx context.Context, job *DocumentJob) (
 	}
 
 	if err := a.db.UpsertJob(ctx, dbJob); err != nil {
-		if errors.Is(err, postgres.ErrVersionConflict) {
+		if a.db.IsVersionConflict(err) {
 			// Retry once: re-GET, re-apply version, Upsert again
 			existingJob, getErr := a.db.GetJob(ctx, job.JobID, job.TenantID)
 			if getErr == nil {

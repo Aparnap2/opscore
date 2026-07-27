@@ -280,6 +280,14 @@ func (m *mockHandlerDB) ListAuditEvents(_ context.Context, tenantID, targetType,
 	return result, nil
 }
 
+func (m *mockHandlerDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *mockHandlerDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
+
 // mockHandlerStorage implements StorageProvider for handler tests.
 type mockHandlerStorage struct {
 	mu    sync.Mutex

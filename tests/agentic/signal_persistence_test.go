@@ -60,6 +60,10 @@ func newRecordingDB() *recordingDB {
 
 var _ providers.DBProvider = (*recordingDB)(nil)
 
+func (d *recordingDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
+
 // -- Manufacturing upserts (the assertions target these) --------------------
 
 func (d *recordingDB) UpsertPurchaseOrder(_ context.Context, po *domain.PurchaseOrder) error {

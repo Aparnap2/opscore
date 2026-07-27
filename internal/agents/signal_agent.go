@@ -161,36 +161,43 @@ type SignalRelated struct {
 // blank inherits the job's tenant, and a blank Status defaults to
 // ExceptionStatusOpen, so the write is always correctly RLS-scoped and carries a
 // valid lifecycle state even when the domain mapper left those fields unset.
+//
+// All writes (PO/GRN/Invoice + ExceptionCases) are performed inside a single
+// database transaction so that a partial failure does not leave orphan rows or
+// duplicate exception cases on retry. If a transaction already exists in the
+// context (e.g., supplied by the worker), it is reused — there is no nesting.
 func PersistSignalResult(ctx context.Context, db providers.DBProvider, job *SignalJob, result *SignalResult) error {
-	switch entity := result.Mapped.(type) {
-	case *domain.PurchaseOrder:
-		if err := db.UpsertPurchaseOrder(ctx, entity); err != nil {
-			return fmt.Errorf("upsert purchase order: %w", err)
+	return db.WithTx(ctx, "", func(txCtx context.Context) error {
+		switch entity := result.Mapped.(type) {
+		case *domain.PurchaseOrder:
+			if err := db.UpsertPurchaseOrder(txCtx, entity); err != nil {
+				return fmt.Errorf("upsert purchase order: %w", err)
+			}
+		case *domain.GoodsReceipt:
+			if err := db.UpsertGoodsReceipt(txCtx, entity); err != nil {
+				return fmt.Errorf("upsert goods receipt: %w", err)
+			}
+		case *domain.Invoice:
+			if err := db.UpsertInvoice(txCtx, entity); err != nil {
+				return fmt.Errorf("upsert invoice: %w", err)
+			}
 		}
-	case *domain.GoodsReceipt:
-		if err := db.UpsertGoodsReceipt(ctx, entity); err != nil {
-			return fmt.Errorf("upsert goods receipt: %w", err)
-		}
-	case *domain.Invoice:
-		if err := db.UpsertInvoice(ctx, entity); err != nil {
-			return fmt.Errorf("upsert invoice: %w", err)
-		}
-	}
 
-	for i := range result.Exceptions {
-		ec := &result.Exceptions[i]
-		if ec.TenantID == "" {
-			ec.TenantID = job.TenantID
+		for i := range result.Exceptions {
+			ec := &result.Exceptions[i]
+			if ec.TenantID == "" {
+				ec.TenantID = job.TenantID
+			}
+			if ec.Status == "" {
+				ec.Status = domain.ExceptionStatusOpen
+			}
+			if err := db.UpsertExceptionCase(txCtx, ec); err != nil {
+				return fmt.Errorf("upsert exception case: %w", err)
+			}
 		}
-		if ec.Status == "" {
-			ec.Status = domain.ExceptionStatusOpen
-		}
-		if err := db.UpsertExceptionCase(ctx, ec); err != nil {
-			return fmt.Errorf("upsert exception case: %w", err)
-		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // signalHITLPolicy decides human review deterministically:

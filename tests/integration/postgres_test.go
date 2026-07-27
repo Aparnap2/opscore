@@ -14,7 +14,7 @@ import (
 func TestPostgresAdapter(t *testing.T) {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		connStr = "postgres://opscore:opscore@localhost:5433/opscore?sslmode=disable"
+		connStr = "postgres://opscore:opscore@localhost:14433/opscore?sslmode=disable"
 	}
 
 	ctx := context.Background()

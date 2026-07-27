@@ -554,3 +554,10 @@ func (m *goldMockDB) ListExceptionCases(_ context.Context, _, _, _ string, _, _ 
 	return nil, nil
 }
 func (m *goldMockDB) UpdateExceptionCaseStatus(_ context.Context, _, _, _ string) error { return nil }
+func (m *goldMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *goldMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}

@@ -227,6 +227,14 @@ func (m *mockDB) GetRecentCompliance(_ context.Context, tenantID string, limit i
 	return nil, nil // Not needed for mock tests
 }
 
+func (m *mockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *mockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
+
 // --- Manufacturing pivot (Phase 1.4A) mock stubs ---------------------------
 
 func (m *mockDB) UpsertPurchaseOrder(_ context.Context, _ *domain.PurchaseOrder) error {
@@ -707,9 +715,9 @@ func TestVendorAgent_ProcessVendor_Clean(t *testing.T) {
 		t.Errorf("vendor Approved = true, want false (risk 65 >= 60)")
 	}
 
-	// TrustBattery.Tier: risk 65 >= 50 → STANDARD
-	if vendor.TrustBattery.Tier != domain.TrustTierStandard {
-		t.Errorf("TrustBattery.Tier = %s, want STANDARD", vendor.TrustBattery.Tier)
+	// TrustBattery.Tier: risk 65 >= 60 → PROBATION (correct mapping)
+	if vendor.TrustBattery.Tier != domain.TrustTierProbation {
+		t.Errorf("TrustBattery.Tier = %s, want PROBATION (risk 65 >= 60)", vendor.TrustBattery.Tier)
 	}
 
 	// Verify job upserted
@@ -866,6 +874,114 @@ func TestVendorAgent_ProcessVendor_WithLLMAnalysis(t *testing.T) {
 	if vendor.Name != "LLM Vendor" {
 		t.Errorf("vendor name = %s, want LLM Vendor", vendor.Name)
 	}
+}
+
+func TestVendorAgent_ProcessVendor_TrustTierCorrectness(t *testing.T) {
+	// Regression test for bug C1: trust tier logic was inverted in lines 138-146.
+	// Low-risk vendor must NOT get Blocked, and high-risk vendor must NOT get Preferred.
+	agent, db := newTestVendorAgent()
+
+	t.Run("low risk gets Preferred not Blocked", func(t *testing.T) {
+		// Empty IDs: base 50 - 20 (not approved) - 15 (incomplete docs) = riskScore 15 (low risk)
+		job := &VendorJob{
+			TenantID: testTenantID,
+			JobID:    testJobID + "-tier-low",
+			VendorData: &VendorData{
+				Name: "Low Risk Vendor",
+			},
+		}
+
+		_, err := agent.ProcessVendor(context.Background(), job)
+		if err != nil {
+			t.Fatalf("ProcessVendor() returned error: %v", err)
+		}
+
+		vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
+		if err != nil {
+			t.Fatalf("GetVendor() returned error: %v", err)
+		}
+
+		if vendor.RiskScore != 15 {
+			t.Errorf("riskScore = %d, want 15 (low risk)", vendor.RiskScore)
+		}
+
+		// BUG CHECK: low risk must NOT be Blocked
+		if vendor.TrustBattery.Tier == domain.TrustTierBlocked {
+			t.Error("BUG C1 CONFIRMED: low risk vendor (score=15) got BLOCKED tier — trust tier logic is inverted!")
+		}
+
+		// Correct behavior: riskScore=15 (< 30, no validation errors) → Preferred
+		if vendor.TrustBattery.Tier != domain.TrustTierPreferred {
+			t.Errorf("TrustBattery.Tier for riskScore=15 = %s, want PREFERRED", vendor.TrustBattery.Tier)
+		}
+	})
+
+	t.Run("high risk gets Probation not Preferred", func(t *testing.T) {
+		// All valid IDs but not approved: base 50 + 15 (GST) + 10 (PAN) + 10 (IFSC) - 20 = 65 (high risk)
+		job := &VendorJob{
+			TenantID: testTenantID,
+			JobID:    testJobID + "-tier-high",
+			VendorData: &VendorData{
+				Name:        "High Risk Vendor",
+				GSTNumber:   validGST(),
+				PANNumber:   validPAN(),
+				IFSCCode:    validIFSC(),
+				BankAccount: "123456789012345678",
+				Address:     "Mumbai, India",
+			},
+		}
+
+		_, err := agent.ProcessVendor(context.Background(), job)
+		if err != nil {
+			t.Fatalf("ProcessVendor() returned error: %v", err)
+		}
+
+		vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
+		if err != nil {
+			t.Fatalf("GetVendor() returned error: %v", err)
+		}
+
+		if vendor.RiskScore != 65 {
+			t.Errorf("riskScore = %d, want 65 (high risk)", vendor.RiskScore)
+		}
+
+		// BUG CHECK: high risk must NOT get Preferred
+		if vendor.TrustBattery.Tier == domain.TrustTierPreferred {
+			t.Error("BUG C1 CONFIRMED: high risk vendor (score=65) got PREFERRED tier — trust tier logic is inverted!")
+		}
+
+		// Correct behavior: riskScore=65 (>= 60) → Probation
+		if vendor.TrustBattery.Tier != domain.TrustTierProbation {
+			t.Errorf("TrustBattery.Tier for riskScore=65 = %s, want PROBATION", vendor.TrustBattery.Tier)
+		}
+	})
+
+	t.Run("medium risk gets Standard", func(t *testing.T) {
+		// Valid GST only: base 50 + 15 (GST) - 20 (not approved) = 45 (medium risk)
+		job := &VendorJob{
+			TenantID: testTenantID,
+			JobID:    testJobID + "-tier-med",
+			VendorData: &VendorData{
+				Name:      "Medium Risk Vendor",
+				GSTNumber: validGST(),
+			},
+		}
+
+		_, err := agent.ProcessVendor(context.Background(), job)
+		if err != nil {
+			t.Fatalf("ProcessVendor() returned error: %v", err)
+		}
+
+		vendor, err := db.GetVendor(context.Background(), job.JobID, testTenantID)
+		if err != nil {
+			t.Fatalf("GetVendor() returned error: %v", err)
+		}
+
+		// Correct behavior: riskScore=45 (< 60) → Standard
+		if vendor.TrustBattery.Tier != domain.TrustTierStandard {
+			t.Errorf("TrustBattery.Tier for riskScore=45 = %s, want STANDARD", vendor.TrustBattery.Tier)
+		}
+	})
 }
 
 func TestVendorAgent_ProcessVendor_Duplicate(t *testing.T) {

@@ -392,6 +392,13 @@ func (m *contractMockDB) GetRiskyVendors(_ context.Context, _ string) ([]*domain
 func (m *contractMockDB) GetRecentCompliance(_ context.Context, _ string, _ int) ([]*domain.ComplianceRecord, error) {
 	return nil, nil
 }
+func (m *contractMockDB) IsVersionConflict(_ error) bool {
+	return false
+}
+
+func (m *contractMockDB) WithTx(_ context.Context, _ string, fn func(context.Context) error) error {
+	return fn(context.Background())
+}
 
 func TestContract_DBProvider_CRUDRoundTrips(t *testing.T) {
 	db := newContractMockDB()
