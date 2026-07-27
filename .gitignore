@@ -1,3 +1,16 @@
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+/server
+
+# Python (legacy from v1)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,22 +31,40 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-*.env
+
+# Environment - NEVER commit secrets
+.env
 .env.local
+.env.*.local
+config/live.env
 .venv
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
 .mypy_cache/
 .ruff_cache/
-*.log
-.DS_Store
+
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+
+# Logs & OS
+*.log
+.DS_Store
+
+# Azure Functions artifacts (legacy)
+handler
+handler.exe
+*.zip
+
+# opencode agent config
+.opencode/

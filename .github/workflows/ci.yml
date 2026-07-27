@@ -1,0 +1,151 @@
+# OpsCore v3.0 - CI Pipeline
+#
+# Runs on: push to main, feature branches, and PRs
+#
+# Jobs:
+#   - quality: golangci-lint + go vet + python syntax check
+#   - unit: unit tests + build (no external services)
+#   - integration: docker services + integration tests with -tags integration
+#   - python-lint: Streamlit UI syntax validation
+
+name: CI
+
+on:
+  push:
+    branches: [main, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25'
+  GOLANGCI_LINT_VERSION: v2.1.2
+
+jobs:
+  # =======================================================================
+  # Quality Gate – Lint, vet, and syntax check (fastest feedback)
+  # =======================================================================
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Python syntax check
+        run: |
+          python3 -m py_compile ops-ui/app.py
+          python3 -m py_compile ops-ui/config.py
+
+  # =======================================================================
+  # Unit Tests - No external services required
+  # =======================================================================
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [quality]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run unit tests
+        run: go test ./internal/domain/... -v -race
+
+      - name: Build check
+        run: go build ./...
+
+  # =======================================================================
+  # Integration Tests - Requires Docker services
+  # =======================================================================
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [unit]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports:
+          5432:5432
+        env:
+          POSTGRES_DB: opscore
+          POSTGRES_USER: opscore
+          POSTGRES_PASSWORD: opscore
+        options: >-
+          --health-cmd "pg_isready -U opscore -d opscore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      minio:
+        image: minio/minio:latest
+        ports:
+          9000:9000
+          9001:9001
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run integration tests
+        run: go test ./tests/... -v -tags integration -timeout 300s
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: opscore
+          POSTGRES_USER: opscore
+          POSTGRES_PASSWORD: opscore
+          S3_ENDPOINT: localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_USE_SSL: "false"
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          APP_ENV: ci

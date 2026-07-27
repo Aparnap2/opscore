@@ -1,0 +1,132 @@
+# OpsCore Full E2E Test Stack
+# Includes: Postgres, MinIO, Redis, API server, worker, and stub OCR/LLM provider
+#
+# Usage:
+#   docker compose -f docker-compose.e2e.yml up -d --build
+#   docker compose -f docker-compose.e2e.yml run --rm e2e
+#   docker compose -f docker-compose.e2e.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opscore-e2e-postgres
+    ports: ["14433:5432"]
+    environment:
+      POSTGRES_DB: opscore
+      POSTGRES_USER: opscore
+      POSTGRES_PASSWORD: opscore
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opscore -d opscore"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks: [opscore-e2e-net]
+
+  minio:
+    image: minio/minio:latest
+    container_name: opscore-e2e-minio
+    ports: ["9002:9000"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks: [opscore-e2e-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: opscore-e2e-redis
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks: [opscore-e2e-net]
+
+  stub-ocr:
+    image: python:3.12-alpine
+    container_name: opscore-e2e-stub-ocr
+    command: >
+      sh -c "
+      pip install flask -q &&
+      echo 'from flask import Flask, jsonify
+      app = Flask(__name__)
+      @app.route(\"/v1/ocr\", methods=[\"POST\"])
+      def ocr():
+          return jsonify({\"status\": \"completed\", \"text\": \"INVOICE INV-001\nVendor: ABC Corp\nTotal: ₹1,50,000\nGST: 29AABCU9603R1ZP\", \"confidence\": 0.95, \"language\": \"en\"})
+      @app.route(\"/v1/chat/completions\", methods=[\"POST\"])
+      def chat():
+          return jsonify({\"choices\": [{\"message\": {\"content\": \"{\\\"invoice_number\\\": \\\"INV-001\\\", \\\"total_amount\\\": \\\"150000\\\", \\\"vendor_name\\\": \\\"ABC Corp\\\"}\"}}]})
+      app.run(host=\"0.0.0.0\", port=8000)' | python
+      "
+    ports: ["8001:8000"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [opscore-e2e-net]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opscore-e2e-api
+    ports: ["8081:8080"]
+    environment:
+      DATABASE_URL: postgres://opscore:opscore@postgres:5432/opscore?sslmode=disable
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_USE_SSL: "false"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      SARVAM_API_KEY: test-stub-key
+      SARVAM_BASE_URL: http://stub-ocr:8000
+      PORT: "8080"
+      APP_ENV: test
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [opscore-e2e-net]
+
+  e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opscore-e2e-runner
+    command: >
+      sh -c "
+      go test ./tests/e2e/... -v -count=1 -timeout 120s
+      "
+    environment:
+      DATABASE_URL: postgres://opscore:opscore@postgres:5432/opscore?sslmode=disable
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_USE_SSL: "false"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      SARVAM_API_KEY: test-stub-key
+      SARVAM_BASE_URL: http://stub-ocr:8000
+      APP_ENV: test
+      OPSCORE_API_URL: http://api:8080
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_started }
+    networks: [opscore-e2e-net]
+
+networks:
+  opscore-e2e-net:
+    driver: bridge

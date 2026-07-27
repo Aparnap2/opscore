@@ -1,0 +1,81 @@
+# OpsCore Integration Test Stack
+# Lean, low-resource: Postgres + Redis + MinIO only (no app/sidecars/observability).
+# Reuses the same lightweight images as docker-compose.local.yml / docker-compose.e2e.yml.
+#
+# Usage (via Makefile):
+#   make test-integration
+#
+# Or manually:
+#   docker compose -f docker-compose.test.yml up -d --wait
+#   DATABASE_URL=postgres://opscore:opscore@localhost:15433/opscore?sslmode=disable \
+#   REDIS_ADDR=localhost:16379 \
+#   TEST_S3_ENDPOINT=localhost:19000 \
+#   go test ./tests/integration/... -v -timeout 300s
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Ports are offset from the manual/local stacks (5432/5433, 6379, 9000) so this
+# stack never collides with a manually started container. Container/volume names use a
+# distinct `opscore-it-*` prefix to avoid clashing with other compose projects.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opscore-it-postgres
+    ports: ["15433:5432"]
+    environment:
+      POSTGRES_DB: opscore
+      POSTGRES_USER: opscore
+      POSTGRES_PASSWORD: opscore
+    mem_limit: 384m
+    cpus: 0.50
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opscore -d opscore"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - opscore_it_pg:/var/lib/postgresql/data
+    networks: [opscore-it-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: opscore-it-redis
+    ports: ["16379:6379"]
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks: [opscore-it-net]
+
+  minio:
+    image: minio/minio:latest
+    container_name: opscore-it-minio
+    ports: ["19000:9000", "19001:9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    mem_limit: 256m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - opscore_it_minio:/data
+    networks: [opscore-it-net]
+
+networks:
+  opscore-it-net:
+    driver: bridge
+
+volumes:
+  opscore_it_pg:
+  opscore_it_minio:
